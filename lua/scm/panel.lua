@@ -263,6 +263,19 @@ function M.back()
   M.refresh({ cursor = "top" })
 end
 
+--- The working-tree change list. Used by `:Scm` / prefix+gg so history is not
+--- a dead end: those mappings always land here instead of closing the panel.
+function M.show_status()
+  state.panel.stack = {}
+  state.panel.view = { kind = "status" }
+  M.open()
+end
+
+--- True when the panel is showing the working-tree list (not history).
+local function on_status()
+  return M.view().kind == "status" and #state.panel.stack == 0
+end
+
 ---------------------------------------------------------------------------
 -- Keymaps
 ---------------------------------------------------------------------------
@@ -314,7 +327,8 @@ local HELP = {
   "  <BS>       back to the previous view",
   "",
   "Anywhere",
-  "  J / K      next / previous item     r  refresh     q  close",
+  "  J / K      next / previous item     r  refresh",
+  "  q          back (on the change list: close)",
   "",
   "In a diff: ]c / [c jump between changes, q / <BS> back to the list,",
   "<leader>gS stages the file, gf / <leader>gf opens the working tree file.",
@@ -539,7 +553,13 @@ local function attach_keymaps(buf)
   map("R", function()
     M.refresh()
   end, "Refresh")
-  map("q", M.close, "Close panel")
+  map("q", function()
+    if on_status() then
+      M.close()
+    else
+      M.back()
+    end
+  end, "Back / close")
   map("g?", function()
     vim.notify(table.concat(HELP, "\n"), vim.log.levels.INFO, { title = "scm.nvim" })
   end, "Help")
@@ -768,12 +788,13 @@ function M.close()
 end
 
 function M.toggle()
-  -- Visible list: leave SCM. Hidden behind a diff: bring the list back.
-  -- Otherwise open it.
-  if M.is_open() then
+  -- Already looking at the working tree: leave SCM. Otherwise show it —
+  -- including when history or a diff is on screen, so prefix+gg after
+  -- prefix+gl gets you back to the change list.
+  if M.is_open() and on_status() then
     M.close()
   else
-    M.open()
+    M.show_status()
   end
 end
 

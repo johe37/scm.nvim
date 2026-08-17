@@ -1,6 +1,6 @@
 -- scm.nvim — a full-screen source control view for Neovim.
 --
---   :Scm            toggle the panel (takes over the current window)
+--   :Scm            toggle the change list; from history, come back to it
 --   :ScmDiff        diff the current file side by side
 --   :ScmCommit      write a commit message for what is staged
 --   :ScmLog         browse commits; <CR> inspects one, its files diff on <CR>
@@ -140,7 +140,7 @@ end
 
 -- Public API, all lazily resolved so `require("scm")` stays cheap.
 function M.open()
-  require("scm.panel").open()
+  require("scm.panel").show_status()
 end
 
 function M.close()

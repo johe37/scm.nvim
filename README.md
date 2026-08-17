@@ -42,8 +42,8 @@ No dependencies beyond `git` and Neovim ≥ 0.10.
 
 | Command | What it does |
 | --- | --- |
-| `:Scm` | Toggle the source control panel (takes over the current window) |
-| `:ScmOpen` / `:ScmClose` | Open / close the panel |
+| `:Scm` | Toggle the change list. From history, this comes back to the working tree rather than closing |
+| `:ScmOpen` / `:ScmClose` | Open the change list / close the panel |
 | `:ScmRefresh` | Re-read `git status` |
 | `:ScmDiff [rev]` | Diff the current file side by side (against `rev` if given) |
 | `:ScmDiffClose` | Close the diff and leave diff mode |
@@ -55,8 +55,9 @@ No dependencies beyond `git` and Neovim ≥ 0.10.
 
 ## The three views
 
-The panel hosts one view at a time and `<BS>` walks back through the ones you
-came from:
+The panel hosts one view at a time. `<BS>` or `q` walks back through the ones
+you came from; `:Scm` / your prefix+gg mapping always returns to the working
+tree, even if you are in history:
 
 - **status** — the working tree (this is what `:Scm` opens)
 - **log** — a commit list, repo-wide (`L`) or for a single file (`l`)
@@ -89,7 +90,8 @@ History:
 | `D` | Open the commit as one unified patch (`q` / `<BS>` back) |
 | `m` | Load another 50 commits |
 | `y` | Yank the commit sha |
-| `<BS>` | Back to the previous view |
+| `<BS>` | Back to the previous view (history → change list) |
+| `q` | Same as `<BS>`; on the change list, close the panel |
 
 Anywhere:
 
@@ -97,7 +99,7 @@ Anywhere:
 | --- | --- |
 | `J` / `K` | Jump to the next / previous item |
 | `r` | Refresh |
-| `q` | Close the panel and any open diff |
+| `q` | Back one view; on the change list, close |
 | `g?` | Show this list |
 
 ## Diff mappings

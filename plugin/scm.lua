@@ -9,7 +9,7 @@ end
 
 cmd("Scm", function()
   require("scm").toggle()
-end, { desc = "Toggle the source control panel (full window)" })
+end, { desc = "Toggle the change list (from history, return to it)" })
 
 cmd("ScmOpen", function()
   require("scm").open()
