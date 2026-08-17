@@ -15,13 +15,39 @@ local function buf_valid(buf)
   return buf and vim.api.nvim_buf_is_valid(buf)
 end
 
+local function is_scratch(buf)
+  return buf_valid(buf) and vim.api.nvim_buf_get_name(buf):sub(1, 6) == "scm://"
+end
+
 --- Wipe a buffer we created ourselves, never a real file buffer.
 local function drop_scratch(buf)
-  if not buf_valid(buf) then
+  if is_scratch(buf) then
+    pcall(vim.api.nvim_buf_delete, buf, { force = true })
+  end
+end
+
+--- A real file buffer to put in a leftover editor window. Prefer `preferred`
+--- (what the editor showed before the diff) over any other listed buffer.
+local function editor_buf(preferred)
+  if buf_valid(preferred) and not is_scratch(preferred) and preferred ~= state.panel.buf then
+    return preferred
+  end
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(buf) and vim.bo[buf].buflisted and not is_scratch(buf) and buf ~= state.panel.buf then
+      return buf
+    end
+  end
+  return vim.api.nvim_create_buf(true, false)
+end
+
+local DIFF_MAPS = { "q", "<leader>gq", "<leader>gf", "<leader>gS" }
+
+local function detach_keymaps(buf)
+  if not buf_valid(buf) or vim.bo[buf].buftype == "nofile" then
     return
   end
-  if vim.api.nvim_buf_get_name(buf):sub(1, 6) == "scm://" then
-    pcall(vim.api.nvim_buf_delete, buf, { force = true })
+  for _, lhs in ipairs(DIFF_MAPS) do
+    pcall(vim.keymap.del, "n", lhs, { buffer = buf })
   end
 end
 
@@ -134,8 +160,13 @@ function M.main_win()
   end
   if win_valid(state.panel.win) then
     vim.api.nvim_set_current_win(state.panel.win)
-    vim.cmd(config.position == "left" and "botright vsplit" or "topleft vsplit")
-    return vim.api.nvim_get_current_win()
+    -- `vnew` so we never clone the panel buffer into the editor area.
+    vim.cmd(config.position == "left" and "botright vnew" or "topleft vnew")
+    local win = vim.api.nvim_get_current_win()
+    if win == state.panel.win then
+      vim.notify("scm: could not create an editor window", vim.log.levels.WARN)
+    end
+    return win
   end
   return vim.api.nvim_get_current_win()
 end
@@ -163,6 +194,9 @@ local function restore_win_opts(win)
 end
 
 local function setup_diff_win(win, label, hl)
+  if win == state.panel.win then
+    return
+  end
   vim.api.nvim_set_current_win(win)
   vim.w[win].scm_diff = true
   vim.cmd("diffthis")
@@ -175,24 +209,101 @@ local function setup_diff_win(win, label, hl)
   vim.wo[win].winbar = "%#" .. hl .. "# " .. label:gsub("%%", "%%%%") .. " %*"
 end
 
---- Close the diff windows and take the file buffer out of diff mode.
+--- Close both side-by-side windows. When the panel is open, focus goes back
+--- there. A leftover editor window is kept only if this would otherwise leave
+--- the tab with no ordinary window (Neovim cannot have zero windows).
 function M.close()
   local d = state.diff
-  for _, win in ipairs({ d.left_win, d.right_win }) do
-    if win_valid(win) then
-      vim.api.nvim_win_call(win, function()
-        pcall(vim.cmd, "diffoff")
-      end)
-      restore_win_opts(win)
-      vim.w[win].scm_diff = false
+  if d.closing then
+    return
+  end
+  if not (win_valid(d.left_win) or win_valid(d.right_win) or d.entry) then
+    return
+  end
+
+  d.closing = true
+  d.gen = (d.gen or 0) + 1
+
+  local ok, err = pcall(function()
+    local left, right = d.left_win, d.right_win
+    local left_buf, right_buf = d.left_buf, d.right_buf
+    local restore = editor_buf(d.prev_buf)
+
+    for _, win in ipairs({ left, right }) do
+      if win_valid(win) then
+        vim.api.nvim_win_call(win, function()
+          pcall(vim.cmd, "diffoff")
+        end)
+        restore_win_opts(win)
+        vim.w[win].scm_diff = false
+      end
     end
+    detach_keymaps(right_buf)
+    if win_valid(right) then
+      detach_keymaps(vim.api.nvim_win_get_buf(right))
+    end
+
+    -- Forget these windows before closing them so the WinClosed autocmd does
+    -- not treat this teardown as "the user closed a pane by hand".
+    d.left_win, d.right_win, d.left_buf, d.right_buf, d.entry, d.prev_buf = nil, nil, nil, nil, nil, nil
+
+    local panel_win = state.panel.win
+    -- Keep one editor window so the panel stays a sidebar. Closing both
+    -- comparison panes used to leave only the panel: it stretched full width
+    -- and could keep `foldmethod=diff`, which made Changes look stuck folded.
+    local keep
+    if win_valid(right) and right ~= panel_win then
+      keep = right
+    elseif win_valid(left) and left ~= panel_win then
+      keep = left
+    end
+    if keep then
+      vim.api.nvim_win_set_buf(keep, restore)
+    end
+
+    for _, win in ipairs({ left, right }) do
+      if win ~= keep and win ~= panel_win and win_valid(win) and #vim.api.nvim_tabpage_list_wins(0) > 1 then
+        pcall(vim.api.nvim_win_close, win, true)
+      end
+    end
+
+    drop_scratch(left_buf)
+    drop_scratch(right_buf)
+
+    if win_valid(panel_win) then
+      pcall(function()
+        vim.wo[panel_win].foldenable = false
+        vim.wo[panel_win].foldmethod = "manual"
+        vim.wo[panel_win].diff = false
+      end)
+      pcall(vim.api.nvim_win_set_width, panel_win, config.width)
+      pcall(vim.api.nvim_set_current_win, panel_win)
+    elseif win_valid(keep) then
+      pcall(vim.api.nvim_set_current_win, keep)
+    end
+  end)
+
+  d.closing = false
+  if not ok then
+    error(err)
   end
-  if win_valid(d.left_win) and #vim.api.nvim_tabpage_list_wins(0) > 1 then
-    pcall(vim.api.nvim_win_close, d.left_win, true)
+end
+
+--- Called from the WinClosed autocmd when the user closes a pane by hand.
+--- Deferred so the window is gone first; ignored if a newer open/close happened
+--- in the meantime (otherwise `<CR>` after `q` opens and is immediately torn down).
+function M.on_win_closed(win)
+  local d = state.diff
+  if d.closing or (win ~= d.left_win and win ~= d.right_win) then
+    return
   end
-  drop_scratch(d.left_buf)
-  drop_scratch(d.right_buf)
-  d.left_win, d.right_win, d.left_buf, d.right_buf, d.entry = nil, nil, nil, nil, nil
+  local gen = d.gen
+  vim.schedule(function()
+    if state.diff.closing or state.diff.gen ~= gen then
+      return
+    end
+    M.close()
+  end)
 end
 
 --- True when both diff windows are still on screen and usable.
@@ -212,6 +323,9 @@ function M.open(entry, opts)
     vim.notify("scm: not inside a git repository", vim.log.levels.WARN)
     return
   end
+  -- Invalidate any close queued by the previous `q` / WinClosed before we
+  -- create new windows, otherwise that callback tears this diff down.
+  state.diff.gen = (state.diff.gen or 0) + 1
 
   local left, right = resolve(entry)
   fill_side(left)
@@ -232,6 +346,10 @@ function M.open(entry, opts)
     M.close()
     right_win = M.main_win()
     vim.api.nvim_set_current_win(right_win)
+    local existing = vim.api.nvim_win_get_buf(right_win)
+    if not is_scratch(existing) and existing ~= state.panel.buf then
+      state.diff.prev_buf = existing
+    end
     vim.cmd("aboveleft vsplit")
     left_win = vim.api.nvim_get_current_win()
     save_win_opts(left_win)
@@ -326,6 +444,34 @@ function M.refresh()
   end
 end
 
+--- Close the historical view and open the working-tree file so it can be edited.
+--- The cursor stays on the same line when the file still has that many lines.
+function M.open_working_tree()
+  local entry = state.diff.entry
+  if not entry or not entry.path or not state.root then
+    return
+  end
+  local path = entry.path
+  local abs = state.root .. "/" .. path
+  if not vim.uv.fs_stat(abs) then
+    vim.notify("scm: " .. path .. " is not in the working tree", vim.log.levels.WARN)
+    return
+  end
+
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local win = win_valid(state.diff.right_win) and state.diff.right_win or M.main_win()
+
+  M.close()
+
+  if not win_valid(win) then
+    win = M.main_win()
+  end
+  vim.api.nvim_set_current_win(win)
+  vim.cmd("edit " .. vim.fn.fnameescape(abs))
+  local last = vim.api.nvim_buf_line_count(0)
+  pcall(vim.api.nvim_win_set_cursor, 0, { math.min(cursor[1], last), cursor[2] })
+end
+
 function M.attach_keymaps(buf)
   local function map(lhs, rhs, desc)
     vim.keymap.set("n", lhs, rhs, { buffer = buf, silent = true, desc = "SCM: " .. desc })
@@ -334,6 +480,12 @@ function M.attach_keymaps(buf)
   map("<leader>gq", M.close, "Close diff")
   map("]c", "]c", "Next change")
   map("[c", "[c", "Previous change")
+  map("<leader>gf", M.open_working_tree, "Open working tree file")
+  -- Scratch sides (commits, the index) are not files, so `gf` is free. On the
+  -- real working-tree buffer it stays Neovim's "goto file under cursor".
+  if vim.bo[buf].buftype == "nofile" then
+    map("gf", M.open_working_tree, "Open working tree file")
+  end
   map("<leader>gS", function()
     local entry = state.diff.entry
     if not entry then

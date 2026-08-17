@@ -71,6 +71,7 @@ History:
 | `l` | History of the file under the cursor |
 | `<CR>` | On a commit: inspect it — in a file's history: diff that file at that commit |
 | | On a commit's file: diff it against the parent commit |
+| `gf` | Open the working-tree file (not the historical blob) |
 | `i` | Inspect the commit under the cursor |
 | `D` | Open the commit as one unified patch in the editor area |
 | `m` | Load another 50 commits |
@@ -92,7 +93,9 @@ Anywhere:
 | --- | --- |
 | `]c` / `[c` | Next / previous change (built-in diff mode) |
 | `do` / `dp` | Obtain / put a hunk (built-in diff mode) |
-| `q` | Close the diff |
+| `q` | Close the side-by-side view (back to the panel and your previous file) |
+| `gf` | Open the working-tree file for editing (on read-only sides: commits, the index) |
+| `<leader>gf` | Same, from either side of the diff |
 | `<leader>gS` | Stage the file you are looking at |
 
 ## What each section diffs
@@ -109,9 +112,10 @@ The panel mirrors what VS Code shows when you click an entry:
 - **Merge Conflicts** — "ours" (`:2:`) on the left, the file with its conflict
   markers on the right, editable so you can resolve it in place.
 - **A commit's file** — the parent commit's version on the left, the commit's own
-  version on the right. Both read-only: history is not editable. A file added in
-  the commit gets an empty left side, a deleted one an empty right side, and a
-  renamed one is compared against its old path.
+  version on the right. Both read-only: history is not editable. `gf` (or
+  `<leader>gf`) closes the diff and opens the working-tree file at the same line
+  so you can edit. A file added in the commit gets an empty left side, a deleted
+  one an empty right side, and a renamed one is compared against its old path.
 
 A file's history follows renames (`git log --follow`), so a commit that renamed
 the file is annotated with the name it had before, and diffing it compares the

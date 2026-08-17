@@ -86,10 +86,14 @@ local function set_autocmds()
     desc = "Keep the panel window for the panel — hand other buffers to the editor area",
     callback = function(event)
       local panel = require("scm.panel")
-      if not panel.is_open() or event.buf == state.panel.buf then
+      if not panel.is_open() or event.buf == state.panel.buf or state.diff.closing then
         return
       end
-      if vim.api.nvim_get_current_win() ~= state.panel.win then
+      -- Only when the panel window itself received this buffer. Checking the
+      -- current window is wrong: `<CR>` after `q` sets a file in a new split
+      -- while the cursor may still be on the panel, and that used to steal
+      -- the buffer and collapse the just-opened diff.
+      if vim.api.nvim_win_get_buf(state.panel.win) ~= event.buf then
         return
       end
       vim.api.nvim_win_set_buf(state.panel.win, state.panel.buf)
@@ -106,10 +110,8 @@ local function set_autocmds()
       local win = tonumber(event.match)
       if win == state.panel.win then
         state.panel.win = nil
-      elseif win == state.diff.left_win or win == state.diff.right_win then
-        vim.schedule(function()
-          require("scm.diff").close()
-        end)
+      else
+        require("scm.diff").on_win_closed(win)
       end
     end,
   })

@@ -20,6 +20,9 @@ return {
     left_buf = nil, ---@type integer|nil
     right_buf = nil, ---@type integer|nil
     entry = nil, ---@type table|nil
+    prev_buf = nil, ---@type integer|nil buffer the editor showed before the diff
+    gen = 0, ---@type integer bumped on each open/close so stale WinClosed callbacks no-op
+    closing = false, ---@type boolean true while close() is tearing windows down
     saved = {}, ---@type table window id -> options captured before diff mode
   },
 }

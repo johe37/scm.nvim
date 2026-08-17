@@ -278,7 +278,7 @@ local HELP = {
   "SCM panel",
   "",
   "Working tree (status view)",
-  "  <CR> / o   open the side-by-side diff and jump into it",
+  "  <CR> / o   open the side-by-side diff (on a header: expand it)",
   "  p          open the diff, keep the cursor in the panel",
   "  s / u / -  stage / unstage / toggle the file",
   "  S / U      stage everything in the section / unstage everything",
@@ -291,6 +291,7 @@ local HELP = {
   "  l          history of the file under the cursor",
   "  <CR>       on a commit: inspect it (in a file's history: diff that file)",
   "             on a commit's file: diff it against the parent commit",
+  "  gf         open the working tree file (not the historical blob)",
   "  i          inspect the commit under the cursor",
   "  D          the commit as one unified patch",
   "  m          load more commits",
@@ -300,8 +301,8 @@ local HELP = {
   "Anywhere",
   "  J / K      next / previous item     r  refresh     q  close",
   "",
-  "In a diff: ]c / [c jump between changes, q closes it,",
-  "<leader>gS stages the file you are looking at.",
+  "In a diff: ]c / [c jump between changes, q closes the comparison,",
+  "<leader>gS stages the file, gf / <leader>gf opens the working tree file.",
 }
 
 local function attach_keymaps(buf)
@@ -317,8 +318,10 @@ local function attach_keymaps(buf)
       local lnum = M.is_open() and vim.api.nvim_win_get_cursor(state.panel.win)[1] or 0
       if not item then
         local section = state.panel.sections[lnum]
-        if section then
-          state.panel.collapsed[section] = not state.panel.collapsed[section]
+        -- `<CR>` on a header opens the section; it must not collapse it.
+        -- Collapsing is `<Tab>` only — otherwise opening Changes folds it.
+        if section and state.panel.collapsed[section] then
+          state.panel.collapsed[section] = false
           M.refresh()
         end
         return
@@ -434,6 +437,28 @@ local function attach_keymaps(buf)
     end
     require("scm.log").open_log({ path = path })
   end, "History of this file")
+  map("gf", function()
+    local item = M.current_item()
+    local path = item
+      and (
+        (item.entry and item.entry.path)
+        or (item.file and item.file.path)
+        or (item.commit and item.commit.file and item.commit.file.path)
+      )
+    if not path then
+      vim.notify("scm: put the cursor on a file first", vim.log.levels.WARN)
+      return
+    end
+    local abs = state.root .. "/" .. path
+    if not vim.uv.fs_stat(abs) then
+      vim.notify("scm: " .. path .. " is not in the working tree", vim.log.levels.WARN)
+      return
+    end
+    diff.close()
+    local win = diff.main_win()
+    vim.api.nvim_set_current_win(win)
+    vim.cmd("edit " .. vim.fn.fnameescape(abs))
+  end, "Open working tree file")
   map("D", function()
     local view = M.view()
     local item = M.current_item()
@@ -528,6 +553,8 @@ local function setup_win(win)
   wo.relativenumber = false
   wo.signcolumn = "no"
   wo.foldcolumn = "0"
+  wo.foldenable = false
+  wo.foldmethod = "manual"
   wo.cursorline = true
   wo.wrap = false
   wo.list = false
