@@ -10,8 +10,14 @@ return {
     sections = {}, ---@type table<integer, string> line number -> section key
     collapsed = {}, ---@type table<string, boolean>
     status = nil,
-    view = nil, ---@type table|nil the view the sidebar currently shows
+    view = nil, ---@type table|nil the view the panel currently shows
     stack = {}, ---@type table[] views to walk back through with <BS>
+    -- True from :Scm / panel.open until the session is dismissed. Stays true
+    -- while a diff or patch has taken over the window (the list is hidden).
+    active = false,
+    hidden = false,
+    prev_buf = nil, ---@type integer|nil buffer the window showed before the panel
+    saved = nil, ---@type table<string, any>|nil window options captured on open
   },
 
   diff = {

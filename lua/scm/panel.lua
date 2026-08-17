@@ -1,8 +1,11 @@
--- The sidebar. It hosts three views in one window, VS Code style:
+-- The source-control panel. It takes over the current window (not a sidebar)
+-- and hosts three views:
 --   status  the working tree, grouped into Conflicts/Staged/Changes/Untracked
 --   log     a commit list, either repo-wide or for one file
 --   commit  one commit: metadata, message, and the files it touched
--- `<BS>` walks back through the views you came from.
+-- Opening a file hides this list so the diff can use the whole screen; `q` /
+-- `<BS>` in the diff brings the list back. `<BS>` in the panel walks back
+-- through the views you came from.
 local git = require("scm.git")
 local state = require("scm.state")
 local config = require("scm.config")
@@ -36,6 +39,11 @@ end
 
 function M.is_open()
   return state.panel.win ~= nil and vim.api.nvim_win_is_valid(state.panel.win)
+end
+
+--- True while the SCM session is up, including when a diff has hidden the list.
+function M.is_active()
+  return state.panel.active == true
 end
 
 function M.view()
@@ -128,9 +136,16 @@ local function render_status(add, _, width)
   end
 end
 
+local function display_width()
+  if M.is_open() then
+    return vim.api.nvim_win_get_width(state.panel.win)
+  end
+  return vim.o.columns
+end
+
 local function render(buf)
   local view = M.view()
-  local width = M.is_open() and vim.api.nvim_win_get_width(state.panel.win) or config.width
+  local width = display_width()
   local lines, marks, entries, sections = {}, {}, {}, {}
 
   local function add(text, hls, meta)
@@ -229,7 +244,7 @@ end
 -- Views
 ---------------------------------------------------------------------------
 
---- Switch the sidebar to another view, remembering where we came from.
+--- Switch the panel to another view, remembering where we came from.
 ---@param view table
 ---@param opts? { replace?: boolean }
 function M.set_view(view, opts)
@@ -279,7 +294,7 @@ local HELP = {
   "",
   "Working tree (status view)",
   "  <CR> / o   open the side-by-side diff (on a header: expand it)",
-  "  p          open the diff, keep the cursor in the panel",
+  "  p          open the side-by-side diff",
   "  s / u / -  stage / unstage / toggle the file",
   "  S / U      stage everything in the section / unstage everything",
   "  X          discard changes (untracked files are deleted)",
@@ -301,7 +316,7 @@ local HELP = {
   "Anywhere",
   "  J / K      next / previous item     r  refresh     q  close",
   "",
-  "In a diff: ]c / [c jump between changes, q closes the comparison,",
+  "In a diff: ]c / [c jump between changes, q / <BS> back to the list,",
   "<leader>gS stages the file, gf / <leader>gf opens the working tree file.",
 }
 
@@ -454,9 +469,9 @@ local function attach_keymaps(buf)
       vim.notify("scm: " .. path .. " is not in the working tree", vim.log.levels.WARN)
       return
     end
-    diff.close()
-    local win = diff.main_win()
-    vim.api.nvim_set_current_win(win)
+    M.abandon()
+    local win = vim.api.nvim_get_current_win()
+    M.restore_window(win)
     vim.cmd("edit " .. vim.fn.fnameescape(abs))
   end, "Open working tree file")
   map("D", function()
@@ -534,6 +549,22 @@ end
 -- Window
 ---------------------------------------------------------------------------
 
+local WIN_OPTS = {
+  "number",
+  "relativenumber",
+  "signcolumn",
+  "foldcolumn",
+  "foldenable",
+  "foldmethod",
+  "diff",
+  "cursorline",
+  "wrap",
+  "list",
+  "spell",
+  "statuscolumn",
+  "winbar",
+}
+
 local function create_buf()
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].buftype = "nofile"
@@ -555,12 +586,105 @@ local function setup_win(win)
   wo.foldcolumn = "0"
   wo.foldenable = false
   wo.foldmethod = "manual"
+  wo.diff = false
   wo.cursorline = true
   wo.wrap = false
   wo.list = false
-  wo.winfixwidth = true
   wo.spell = false
   wo.statuscolumn = ""
+  wo.winbar = ""
+end
+
+local function save_win_opts(win)
+  local saved = {}
+  for _, opt in ipairs(WIN_OPTS) do
+    saved[opt] = vim.wo[win][opt]
+  end
+  state.panel.saved = saved
+end
+
+--- Put the window back to how it looked before the panel took it over.
+function M.restore_window(win)
+  if not win_valid(win) then
+    return
+  end
+  local saved = state.panel.saved
+  if saved then
+    for opt, value in pairs(saved) do
+      pcall(function()
+        vim.wo[win][opt] = value
+      end)
+    end
+  end
+  state.panel.saved = nil
+end
+
+local function fallback_buf(preferred)
+  if preferred and vim.api.nvim_buf_is_valid(preferred) and preferred ~= state.panel.buf then
+    return preferred
+  end
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(buf) and vim.bo[buf].buflisted and buf ~= state.panel.buf then
+      return buf
+    end
+  end
+  return vim.api.nvim_create_buf(true, false)
+end
+
+local function ordinary_win()
+  local current = vim.api.nvim_get_current_win()
+  if vim.api.nvim_win_get_config(current).relative == "" then
+    return current
+  end
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if vim.api.nvim_win_get_config(win).relative == "" then
+      return win
+    end
+  end
+  return current
+end
+
+--- Yield the panel window so a diff or patch can take the whole screen.
+---@return integer|nil
+function M.hide()
+  if not M.is_open() then
+    return nil
+  end
+  local win = state.panel.win
+  state.panel.hidden = true
+  state.panel.win = nil
+  return win
+end
+
+--- Put the list back in `win` after a diff or patch is dismissed.
+---@param win integer
+---@return boolean
+function M.show(win)
+  if not state.panel.active or not (state.panel.buf and vim.api.nvim_buf_is_valid(state.panel.buf)) then
+    return false
+  end
+  if not win_valid(win) then
+    return false
+  end
+  vim.api.nvim_win_call(win, function()
+    pcall(vim.cmd, "diffoff")
+  end)
+  vim.api.nvim_win_set_buf(win, state.panel.buf)
+  setup_win(win)
+  state.panel.win = win
+  state.panel.hidden = false
+  M.refresh()
+  vim.api.nvim_set_current_win(win)
+  return true
+end
+
+--- End the session without restoring the list. The caller is about to put a
+--- real file in the window (gf, jump to working tree).
+function M.abandon()
+  state.panel.active = false
+  state.panel.hidden = false
+  state.panel.win = nil
+  state.panel.prev_buf = nil
 end
 
 ---@param opts? { keep_focus?: boolean }
@@ -583,35 +707,69 @@ function M.open(opts)
     state.panel.buf = create_buf()
   end
 
-  if not M.is_open() then
-    local previous = vim.api.nvim_get_current_win()
-    vim.cmd(config.position == "left" and "topleft vsplit" or "botright vsplit")
-    local win = vim.api.nvim_get_current_win()
-    vim.api.nvim_win_set_buf(win, state.panel.buf)
-    vim.api.nvim_win_set_width(win, config.width)
-    setup_win(win)
-    state.panel.win = win
-    M.refresh()
-    if opts.keep_focus and win_valid(previous) then
-      vim.api.nvim_set_current_win(previous)
+  -- A diff or patch has the screen: bring the list back.
+  if state.panel.active and state.panel.hidden then
+    diff.close()
+    if not M.is_open() then
+      M.show(ordinary_win())
     end
-  else
+    return
+  end
+
+  if M.is_open() then
     M.refresh()
     if not opts.keep_focus then
       vim.api.nvim_set_current_win(state.panel.win)
     end
+    return
+  end
+
+  -- Collapse any stray side-by-side view before taking the window.
+  diff.close({ restore_panel = false })
+
+  local win = ordinary_win()
+  local existing = vim.api.nvim_win_get_buf(win)
+  if existing ~= state.panel.buf then
+    state.panel.prev_buf = existing
+    save_win_opts(win)
+  end
+
+  vim.api.nvim_win_set_buf(win, state.panel.buf)
+  setup_win(win)
+  state.panel.win = win
+  state.panel.active = true
+  state.panel.hidden = false
+  M.refresh()
+  if not opts.keep_focus then
+    vim.api.nvim_set_current_win(win)
   end
 end
 
 function M.close()
-  diff.close()
-  if M.is_open() and #vim.api.nvim_tabpage_list_wins(0) > 1 then
-    pcall(vim.api.nvim_win_close, state.panel.win, true)
-  end
+  local restore = state.panel.prev_buf
+  local win = state.panel.win
+  state.panel.active = false
+  state.panel.hidden = false
   state.panel.win = nil
+  state.panel.prev_buf = nil
+
+  local leftover = diff.close({ restore_panel = false })
+  if win_valid(leftover) then
+    win = leftover
+  end
+  if not win_valid(win) then
+    win = ordinary_win()
+  end
+  if win_valid(win) then
+    M.restore_window(win)
+    vim.api.nvim_win_set_buf(win, fallback_buf(restore))
+    vim.api.nvim_set_current_win(win)
+  end
 end
 
 function M.toggle()
+  -- Visible list: leave SCM. Hidden behind a diff: bring the list back.
+  -- Otherwise open it.
   if M.is_open() then
     M.close()
   else

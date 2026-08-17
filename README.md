@@ -1,35 +1,48 @@
 # scm.nvim
 
-A VS Code style source control view for Neovim: a sidebar listing your current
-changes, and a side-by-side diff where the left window is the old version and the
-right window is the real file — editable, savable, and re-diffed as you type.
+A full-screen source control view for Neovim. `:Scm` (or your `prefix+gg`
+mapping) takes over the current window with the change list. Opening a file
+replaces that list with a side-by-side diff — left is the old version, right is
+the real file, editable, savable, and re-diffed as you type. `q` or `<BS>`
+brings the list back.
 
-The same sidebar also browses history, GitLens style: commit lists, one commit's
+The same panel also browses history, GitLens style: commit lists, one commit's
 metadata and files, and a jump from any line to the commit that wrote it.
 
 No dependencies beyond `git` and Neovim ≥ 0.10.
 
 ```
-┌──────────────────────────┬───────────────────────────┬───────────────────────────┐
-│ Source Control           │ Index: lua/plugins/scm.lua│ lua/plugins/scm.lua       │
-│ master                   ├───────────────────────────┼───────────────────────────┤
-│ nvim                     │ local a = 1               │ local a = 1               │
-│                          │ local b = 2               │ local b = 42              │
-│ v Staged Changes (1)     │ return a + b              │ return a + b              │
-│   M  scm.lua  lua/plugins│                           │                           │
-│ v Changes (2)            │        read-only          │       you type here       │
-│   M  init.lua            │                           │                           │
-│   D  gone.lua            │                           │                           │
-│ v Untracked (1)          │                           │                           │
-│   ?  scratch.txt         │                           │                           │
-└──────────────────────────┴───────────────────────────┴───────────────────────────┘
+:Scm  —  the change list, full window
+
+┌──────────────────────────────────────────────────────────┐
+│ Source Control                                           │
+│ master                                                   │
+│ nvim                                                     │
+│                                                          │
+│ v Staged Changes (1)                                     │
+│   M  scm.lua  lua/plugins                                │
+│ v Changes (2)                                            │
+│   M  init.lua                                            │
+│   D  gone.lua                                            │
+│ v Untracked (1)                                          │
+│   ?  scratch.txt                                         │
+└──────────────────────────────────────────────────────────┘
+
+<CR>  —  only the diff     q / <BS>  —  back to the list
+
+┌────────────────────────────┬─────────────────────────────┐
+│ Index: lua/plugins/scm.lua │ lua/plugins/scm.lua         │
+│ local a = 1                │ local a = 1                 │
+│ local b = 2                │ local b = 42                │
+│        read-only           │       you type here         │
+└────────────────────────────┴─────────────────────────────┘
 ```
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `:Scm` | Toggle the source control panel |
+| `:Scm` | Toggle the source control panel (takes over the current window) |
 | `:ScmOpen` / `:ScmClose` | Open / close the panel |
 | `:ScmRefresh` | Re-read `git status` |
 | `:ScmDiff [rev]` | Diff the current file side by side (against `rev` if given) |
@@ -42,7 +55,7 @@ No dependencies beyond `git` and Neovim ≥ 0.10.
 
 ## The three views
 
-The sidebar hosts one view at a time and `<BS>` walks back through the ones you
+The panel hosts one view at a time and `<BS>` walks back through the ones you
 came from:
 
 - **status** — the working tree (this is what `:Scm` opens)
@@ -55,8 +68,8 @@ Working tree:
 
 | Key | Action |
 | --- | --- |
-| `<CR>` / `o` / double click | Open the side-by-side diff and jump into it |
-| `p` | Same, but keep the cursor in the panel |
+| `<CR>` / `o` / double click | Open the side-by-side diff (hides the list) |
+| `p` | Open the side-by-side diff |
 | `s` / `u` / `-` | Stage / unstage / toggle the file under the cursor |
 | `S` / `U` | Stage everything in this section / unstage everything |
 | `X` | Discard changes (deletes the file if it is untracked) |
@@ -73,7 +86,7 @@ History:
 | | On a commit's file: diff it against the parent commit |
 | `gf` | Open the working-tree file (not the historical blob) |
 | `i` | Inspect the commit under the cursor |
-| `D` | Open the commit as one unified patch in the editor area |
+| `D` | Open the commit as one unified patch (`q` / `<BS>` back) |
 | `m` | Load another 50 commits |
 | `y` | Yank the commit sha |
 | `<BS>` | Back to the previous view |
@@ -93,7 +106,7 @@ Anywhere:
 | --- | --- |
 | `]c` / `[c` | Next / previous change (built-in diff mode) |
 | `do` / `dp` | Obtain / put a hunk (built-in diff mode) |
-| `q` | Close the side-by-side view (back to the panel and your previous file) |
+| `q` / `<BS>` | Close the side-by-side view (back to the change list) |
 | `gf` | Open the working-tree file for editing (on read-only sides: commits, the index) |
 | `<leader>gf` | Same, from either side of the diff |
 | `<leader>gS` | Stage the file you are looking at |
@@ -125,8 +138,6 @@ right pair of paths.
 
 ```lua
 require("scm").setup({
-  width = 42,               -- panel width
-  position = "left",        -- "left" | "right"
   fold_unchanged = false,   -- true to fold away unchanged regions
   confirm_discard = true,   -- ask before discarding / deleting
   live_diff = true,         -- re-diff shortly after you stop typing
@@ -150,7 +161,7 @@ scm.nvim/
 │   ├── config.lua   -- options
 │   ├── state.lua    -- shared window/buffer state
 │   ├── git.lua      -- git CLI wrapper (status, log, blobs, stage, commit, blame)
-│   ├── panel.lua    -- the sidebar: window, views, keymaps
+│   ├── panel.lua    -- the panel: window, views, keymaps
 │   ├── log.lua      -- the history views (commit list, commit details, blame)
 │   ├── diff.lua     -- the side-by-side view
 │   └── commit.lua   -- the commit message buffer

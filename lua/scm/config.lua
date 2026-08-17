@@ -1,9 +1,9 @@
 local M = {}
 
 M.defaults = {
-  -- Width of the source control panel.
+  -- Kept so existing setups that pass these do not error. The panel is no
+  -- longer a sidebar: it takes over the current window.
   width = 42,
-  -- Open the panel on the left (like VS Code) or the right.
   position = "left", ---@type "left"|"right"
   -- Fold away unchanged regions in the diff. VS Code shows the whole file, so off.
   fold_unchanged = false,

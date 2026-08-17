@@ -1,4 +1,4 @@
--- History views for the sidebar: a commit list (repo-wide or for one file) and a
+-- History views for the panel: a commit list (repo-wide or for one file) and a
 -- single commit's details, with its files openable as side-by-side diffs. The
 -- GitLens half of the plugin.
 local git = require("scm.git")
@@ -138,14 +138,14 @@ end
 -- Actions
 ---------------------------------------------------------------------------
 
---- Show the repo history (or one file's history) in the sidebar.
+--- Show the repo history (or one file's history) in the panel.
 ---@param opts? { path?: string, rev?: string }
 function M.open_log(opts)
   opts = opts or {}
   panel().set_view({ kind = "log", limit = M.PAGE, path = opts.path, rev = opts.rev })
 end
 
---- Show one commit's details in the sidebar.
+--- Show one commit's details in the panel.
 function M.open_commit(rev)
   local info, err = git.commit_info(state.root, rev)
   if not info then
@@ -178,7 +178,7 @@ function M.open_file_diff(file)
   })
 end
 
---- Open the whole commit as a unified patch in the editor area.
+--- Open the whole commit as a unified patch, taking over the panel window.
 function M.open_patch(rev)
   local info = git.commit_info(state.root, rev)
   if not info then
@@ -200,16 +200,26 @@ function M.open_patch(rev)
 
   local diff = require("scm.diff")
   diff.close()
-  local win = diff.main_win()
+  local win
+  if panel().is_open() then
+    win = panel().hide()
+  else
+    win = diff.main_win()
+  end
   vim.api.nvim_win_set_buf(win, buf)
   vim.api.nvim_set_current_win(win)
   vim.bo[buf].filetype = "diff"
   vim.wo[win].winbar = "%#ScmDiffNew# " .. info.short .. " " .. info.subject:gsub("%%", "%%%%") .. " %*"
-  vim.keymap.set("n", "q", function()
+  local function back()
+    if panel().is_active() and panel().show(win) then
+      return
+    end
     if #vim.api.nvim_tabpage_list_wins(0) > 1 then
       pcall(vim.api.nvim_win_close, win, true)
     end
-  end, { buffer = buf, desc = "SCM: close patch" })
+  end
+  vim.keymap.set("n", "q", back, { buffer = buf, desc = "SCM: back to the commit" })
+  vim.keymap.set("n", "<BS>", back, { buffer = buf, desc = "SCM: back to the commit" })
 end
 
 --- Inspect the commit that last touched the current line (GitLens' blame jump).

@@ -1,6 +1,6 @@
--- scm.nvim — a VS Code style source control view for Neovim.
+-- scm.nvim — a full-screen source control view for Neovim.
 --
---   :Scm            toggle the panel
+--   :Scm            toggle the panel (takes over the current window)
 --   :ScmDiff        diff the current file side by side
 --   :ScmCommit      write a commit message for what is staged
 --   :ScmLog         browse commits; <CR> inspects one, its files diff on <CR>
@@ -60,7 +60,7 @@ local function set_autocmds()
       group = group,
       desc = "Refresh the SCM panel after changes on disk",
       callback = function()
-        if require("scm.panel").is_open() then
+        if require("scm.panel").is_active() then
           vim.schedule(function()
             require("scm.panel").refresh()
           end)
@@ -83,7 +83,7 @@ local function set_autocmds()
 
   vim.api.nvim_create_autocmd("BufWinEnter", {
     group = group,
-    desc = "Keep the panel window for the panel — hand other buffers to the editor area",
+    desc = "Keep the panel window for the panel — hand other buffers to another window",
     callback = function(event)
       local panel = require("scm.panel")
       if not panel.is_open() or event.buf == state.panel.buf or state.diff.closing then
@@ -96,10 +96,18 @@ local function set_autocmds()
       if vim.api.nvim_win_get_buf(state.panel.win) ~= event.buf then
         return
       end
+      local other
+      for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+        if win ~= state.panel.win and vim.api.nvim_win_get_config(win).relative == "" then
+          other = win
+          break
+        end
+      end
       vim.api.nvim_win_set_buf(state.panel.win, state.panel.buf)
-      local win = require("scm.diff").main_win()
-      vim.api.nvim_win_set_buf(win, event.buf)
-      vim.api.nvim_set_current_win(win)
+      if other then
+        vim.api.nvim_win_set_buf(other, event.buf)
+        vim.api.nvim_set_current_win(other)
+      end
     end,
   })
 
@@ -110,6 +118,10 @@ local function set_autocmds()
       local win = tonumber(event.match)
       if win == state.panel.win then
         state.panel.win = nil
+        state.panel.active = false
+        state.panel.hidden = false
+        state.panel.prev_buf = nil
+        state.panel.saved = nil
       else
         require("scm.diff").on_win_closed(win)
       end
@@ -158,7 +170,7 @@ function M.commit(opts)
   require("scm.commit").open(opts)
 end
 
---- Commit history in the sidebar.
+--- Commit history in the panel.
 ---@param opts? { path?: string, rev?: string }
 function M.log(opts)
   require("scm.panel").open()

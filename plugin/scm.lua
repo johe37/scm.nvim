@@ -9,7 +9,7 @@ end
 
 cmd("Scm", function()
   require("scm").toggle()
-end, { desc = "Toggle the source control panel" })
+end, { desc = "Toggle the source control panel (full window)" })
 
 cmd("ScmOpen", function()
   require("scm").open()
@@ -29,7 +29,7 @@ end, { nargs = "?", desc = "Diff the current file side by side (optionally again
 
 cmd("ScmDiffClose", function()
   require("scm").close_diff()
-end, { desc = "Close the side-by-side diff" })
+end, { desc = "Close the side-by-side diff (back to the change list)" })
 
 cmd("ScmLog", function(args)
   require("scm").log({ rev = args.args ~= "" and args.args or nil })
