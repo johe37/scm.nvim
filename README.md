@@ -20,10 +20,13 @@ No dependencies beyond `git` and Neovim ≥ 0.10.
 │ nvim                                                     │
 │                                                          │
 │ v Staged Changes (1)                                     │
-│   M  scm.lua  lua/plugins                                │
-│ v Changes (2)                                            │
-│   M  init.lua                                            │
-│   D  gone.lua                                            │
+│   lua/plugins/ (1)                                       │
+│     M  scm.lua                                           │
+│ v Changes (3)                                            │
+│   lua/ (2)                                               │
+│     M  init.lua                                          │
+│     D  gone.lua                                          │
+│   M  README.md                                           │
 │ v Untracked (1)                                          │
 │   ?  scratch.txt                                         │
 └──────────────────────────────────────────────────────────┘
@@ -63,19 +66,24 @@ tree, even if you are in history:
 - **log** — a commit list, repo-wide (`L`) or for a single file (`l`)
 - **commit** — one commit: sha, author, date, full message, and its files
 
+Both file lists group by directory. Chains of directories with a single child
+are joined into one line (`lua/scm/` rather than `lua/` above `scm/`), so a
+change buried five levels deep still costs one indent level. `<Tab>` folds the
+directory under the cursor, and `tree = false` gives you a flat list instead.
+
 ## Panel mappings
 
 Working tree:
 
 | Key | Action |
 | --- | --- |
-| `<CR>` / `o` / double click | Open the side-by-side diff (hides the list) |
+| `<CR>` / `o` / double click | Open the side-by-side diff (hides the list). On a directory: fold it |
 | `p` | Open the side-by-side diff |
 | `s` / `u` / `-` | Stage / unstage / toggle the file under the cursor |
 | `S` / `U` | Stage everything in this section / unstage everything |
 | `X` | Discard changes (deletes the file if it is untracked) |
 | `cc` / `ca` | Commit / amend the last commit |
-| `<Tab>` | Collapse or expand the section under the cursor |
+| `<Tab>` | Fold the directory under the cursor, or the whole section |
 
 History:
 
@@ -140,6 +148,7 @@ right pair of paths.
 
 ```lua
 require("scm").setup({
+  tree = true,              -- false for a flat list of paths
   fold_unchanged = false,   -- true to fold away unchanged regions
   confirm_discard = true,   -- ask before discarding / deleting
   live_diff = true,         -- re-diff shortly after you stop typing
@@ -150,7 +159,7 @@ require("scm").setup({
 ```
 
 Highlight groups (all `default`-linked, so a colorscheme can override them):
-`ScmTitle`, `ScmSection`, `ScmBranch`, `ScmDim`, `ScmPath`, `ScmAdded`,
+`ScmTitle`, `ScmSection`, `ScmBranch`, `ScmDim`, `ScmDir`, `ScmPath`, `ScmAdded`,
 `ScmModified`, `ScmDeleted`, `ScmRenamed`, `ScmConflict`, `ScmUntracked`,
 `ScmSha`, `ScmDiffOld`, `ScmDiffNew`.
 

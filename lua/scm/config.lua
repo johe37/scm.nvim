@@ -5,6 +5,9 @@ M.defaults = {
   -- longer a sidebar: it takes over the current window.
   width = 42,
   position = "left", ---@type "left"|"right"
+  -- Group changed files under their directories instead of listing every path
+  -- flat. Directory chains with a single child are joined into one line.
+  tree = true,
   -- Fold away unchanged regions in the diff. VS Code shows the whole file, so off.
   fold_unchanged = false,
   -- Ask before discarding working tree changes / deleting untracked files.

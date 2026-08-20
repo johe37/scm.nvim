@@ -16,6 +16,7 @@ local HIGHLIGHTS = {
   ScmSection = { link = "Statement" },
   ScmBranch = { link = "Special" },
   ScmDim = { link = "Comment" },
+  ScmDir = { link = "Directory" },
   ScmSha = { link = "Identifier" },
   ScmPath = { link = "Normal" },
   ScmAdded = { link = "Added" },

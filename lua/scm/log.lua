@@ -113,22 +113,15 @@ function M.render_commit(add, view, width)
   view.files = files
   add("")
   add(string.format(" v Files (%d)", #files), { { 0, -1, "ScmSection" } })
-  for _, file in ipairs(files) do
-    local base = vim.fs.basename(file.path)
-    local dir = vim.fs.dirname(file.path)
-    dir = (dir == "." or dir == "") and "" or dir
-    local prefix = string.format("   %s  ", file.code)
-    local text = prefix .. base
-    local hls = {
-      { 3, 4, CODE_HL[file.code] or "ScmModified" },
-      { #prefix, #prefix + #base, file.code == "D" and "ScmDeleted" or "ScmPath" },
-    }
-    if dir ~= "" then
-      text = text .. "  " .. dir
-      hls[#hls + 1] = { #prefix + #base, -1, "ScmDim" }
-    end
-    add(fit(text, width - 1), hls, { item = { type = "commit_file", file = file, key = "cf:" .. file.path } })
-  end
+  require("scm.tree").render(add, files, {
+    -- Scoped to the commit so folding one does not fold every other commit's
+    -- view of the same directory.
+    scope = "commit:" .. commit.short,
+    code_hl = CODE_HL,
+    item = function(file)
+      return { type = "commit_file", file = file, key = "cf:" .. file.path }
+    end,
+  })
 
   add("")
   add("  D  full patch", { { 0, -1, "ScmDim" } }, { item = { type = "patch", key = "patch" } })

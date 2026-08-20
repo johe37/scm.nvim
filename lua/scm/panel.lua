@@ -10,6 +10,7 @@ local git = require("scm.git")
 local state = require("scm.state")
 local config = require("scm.config")
 local diff = require("scm.diff")
+local tree = require("scm.tree")
 
 local M = {}
 
@@ -75,6 +76,15 @@ local function current_section()
   return state.panel.sections[lnum] or (item and item.entry and item.entry.kind) or nil
 end
 
+--- What `<Tab>` folds: the directory under the cursor, else its section.
+local function fold_target()
+  local item = M.current_item()
+  if item and item.type == "dir" then
+    return item.fold
+  end
+  return current_section()
+end
+
 ---------------------------------------------------------------------------
 -- Rendering
 ---------------------------------------------------------------------------
@@ -106,25 +116,14 @@ local function render_status(add, _, width)
         { section = section.key }
       )
       if not collapsed then
-        for _, entry in ipairs(list) do
-          local base = vim.fs.basename(entry.path)
-          local dir = vim.fs.dirname(entry.path)
-          dir = (dir == "." or dir == "") and "" or dir
-          local prefix = string.format("   %s  ", entry.code)
-          local text = prefix .. base
-          local hls = {
-            { 3, 4, CODE_HL[entry.code] or "ScmModified" },
-            { #prefix, #prefix + #base, entry.code == "D" and "ScmDeleted" or "ScmPath" },
-          }
-          if dir ~= "" then
-            text = text .. "  " .. dir
-            hls[#hls + 1] = { #prefix + #base, -1, "ScmDim" }
-          end
-          add(text, hls, {
-            item = { type = "file", entry = entry, key = entry.kind .. ":" .. entry.path },
-            section = section.key,
-          })
-        end
+        tree.render(add, list, {
+          scope = section.key,
+          code_hl = CODE_HL,
+          meta = { section = section.key },
+          item = function(entry)
+            return { type = "file", entry = entry, key = entry.kind .. ":" .. entry.path }
+          end,
+        })
       end
     end
   end
@@ -306,13 +305,14 @@ local HELP = {
   "SCM panel",
   "",
   "Working tree (status view)",
-  "  <CR> / o   open the side-by-side diff (on a header: expand it)",
+  "  <CR> / o   open the side-by-side diff (on a directory: fold it,",
+  "             on a collapsed header: expand it)",
   "  p          open the side-by-side diff",
   "  s / u / -  stage / unstage / toggle the file",
   "  S / U      stage everything in the section / unstage everything",
   "  X          discard changes (untracked files are deleted)",
   "  cc / ca    commit / amend the last commit",
-  "  <Tab>      collapse or expand a section",
+  "  <Tab>      fold the directory under the cursor, or the whole section",
   "",
   "History",
   "  L          commit history for the repository",
@@ -355,7 +355,11 @@ local function attach_keymaps(buf)
         end
         return
       end
-      if item.type == "file" then
+      if item.type == "dir" then
+        -- A directory has nothing else to open, so `<CR>` folds it both ways.
+        state.panel.collapsed[item.fold] = not state.panel.collapsed[item.fold]
+        M.refresh()
+      elseif item.type == "file" then
         diff.open(item.entry, { focus = focus })
       elseif item.type == "commit" then
         -- In a file's history, the interesting thing is that file at that commit.
@@ -517,12 +521,13 @@ local function attach_keymaps(buf)
   map("<BS>", M.back, "Back")
 
   map("<Tab>", function()
-    local section = current_section()
-    if section then
-      state.panel.collapsed[section] = not state.panel.collapsed[section]
+    -- On a directory the innermost thing wins; elsewhere fold the whole section.
+    local key = fold_target()
+    if key then
+      state.panel.collapsed[key] = not state.panel.collapsed[key]
       M.refresh()
     end
-  end, "Toggle section")
+  end, "Fold directory or section")
 
   local function jump(step)
     return function()
