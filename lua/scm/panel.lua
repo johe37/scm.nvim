@@ -369,6 +369,8 @@ local function build_statusline(view, width)
       { text = " History", hl = "ScmTitle" },
       { text = "  " .. where, hl = "ScmBranch", flex = true },
     }
+  elseif view.kind == "help" then
+    left = { { text = " Help", hl = "ScmTitle" } }
   elseif view.kind == "commit" then
     local commit = view.commit
     if commit then
@@ -435,6 +437,9 @@ local function display_width()
   return vim.o.columns
 end
 
+-- Filled in after HELP, which is defined with the keymaps.
+local render_help
+
 local function render(buf)
   local view = M.view()
   local width = display_width()
@@ -462,6 +467,8 @@ local function render(buf)
     require("scm.log").render_log(add, view, width)
   elseif view.kind == "commit" then
     require("scm.log").render_commit(add, view, width)
+  elseif view.kind == "help" then
+    render_help(add, width)
   else
     render_status(add, view, width)
   end
@@ -606,7 +613,6 @@ end
 
 local HELP = {
   "SCM panel",
-  "",
   "Working tree (status view)",
   "  <CR> / o   open the side-by-side diff (on a directory: fold it,",
   "             on a collapsed header: expand it)",
@@ -630,12 +636,49 @@ local HELP = {
   "  <BS>       back to the previous view",
   "",
   "Anywhere",
-  "  J / K      next / previous item     r  refresh",
+  "  J / K      next / previous item",
+  "  r / R      refresh",
   "  q          back (on the change list: close)",
+  "  g?         open this help",
   "",
-  "In a diff: ]c / [c jump between changes, q / <BS> back to the list,",
-  "<leader>gS stages the file, gf / <leader>gf opens the working tree file.",
+  "In a diff",
+  "  ]c / [c    next / previous change",
+  "  do / dp    obtain / put a hunk",
+  "  q / <BS>   back to the list",
+  "  gf         open the working-tree file from a read-only side",
+  "  <leader>gf  open the working-tree file from either side",
+  "  <leader>gS  stage the file you are looking at",
 }
+
+render_help = function(add, width)
+  local limit = math.max((width or 0) - 1, 1)
+  for _, line in ipairs(HELP) do
+    if line == "SCM panel" then
+      -- The statusline already says Help.
+    elseif line == "" then
+      add("")
+    elseif not line:match("^ ") then
+      add(" " .. line, { { 0, -1, "ScmSection" } })
+    else
+      local body = line:match("^  (.*)$") or line
+      local key, desc = body:match("^(.-)%s%s+(.*)$")
+      if key and key ~= "" and desc then
+        local text = M.truncate("  " .. key .. "  " .. desc, limit)
+        local key_end = math.min(2 + #key, #text)
+        local hls = {}
+        if key_end > 2 then
+          hls[#hls + 1] = { 2, key_end, "ScmAction" }
+        end
+        if key_end < #text then
+          hls[#hls + 1] = { key_end, #text, "ScmDim" }
+        end
+        add(text, hls)
+      else
+        add(M.truncate(line, limit), { { 0, -1, "ScmDim" } })
+      end
+    end
+  end
+end
 
 local function attach_keymaps(buf)
   local function map(lhs, rhs, desc)
@@ -869,7 +912,9 @@ local function attach_keymaps(buf)
     end
   end, "Back / close")
   map("g?", function()
-    vim.notify(table.concat(HELP, "\n"), vim.log.levels.INFO, { title = "scm.nvim" })
+    if M.view().kind ~= "help" then
+      M.set_view({ kind = "help" })
+    end
   end, "Help")
 end
 
