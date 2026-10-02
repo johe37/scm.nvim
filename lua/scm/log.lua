@@ -65,15 +65,6 @@ end
 -- Single commit
 ---------------------------------------------------------------------------
 
-local CODE_HL = {
-  M = "ScmModified",
-  A = "ScmAdded",
-  D = "ScmDeleted",
-  R = "ScmRenamed",
-  C = "ScmRenamed",
-  T = "ScmModified",
-}
-
 --- @param view { sha: string }
 function M.render_commit(add, view, width)
   local commit, err = git.commit_info(state.root, view.sha)
@@ -108,7 +99,7 @@ function M.render_commit(add, view, width)
     -- Scoped to the commit so folding one does not fold every other commit's
     -- view of the same directory.
     scope = "commit:" .. commit.short,
-    code_hl = CODE_HL,
+    width = width,
     item = function(file)
       return { type = "commit_file", file = file, key = "cf:" .. file.path }
     end,

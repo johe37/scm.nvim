@@ -39,17 +39,21 @@ function M.code_hl(code)
 end
 
 --- One file row: a colored status letter, a name in that same color, and the
---- directory dimmed after it. A rename shows `old → new`. `file` needs `path`
---- and `code`, and may carry `orig`.
-function M.add_file_row(add, file, meta)
+--- directory dimmed on the right. A rename shows `old → new`. `file` needs
+--- `path` and `code`, and may carry `orig`. `width` is the content width.
+--- `opts.indent` is the leading space (a tree row is deeper than a flat one).
+--- `opts.show_dir` is false when a directory line above already names the folder.
+function M.add_file_row(add, file, meta, width, opts)
+  opts = opts or {}
+  local indent = opts.indent or "   "
   local base = vim.fs.basename(file.path)
   local dir = vim.fs.dirname(file.path)
   dir = (dir == "." or dir == "") and "" or dir
   local orig = file.orig
   local renamed = orig and orig ~= "" and orig ~= file.path
   local name_hl = M.code_hl(file.code)
-  local text = string.format("   %s  ", file.code)
-  local hls = { { 3, 4, name_hl } }
+  local text = indent .. file.code .. "  "
+  local hls = { { #indent, #indent + 1, name_hl } }
 
   if renamed then
     local old_name, new_name
@@ -78,10 +82,27 @@ function M.add_file_row(add, file, meta)
     hls[#hls + 1] = { name_start, #text, name_hl }
   end
 
+  if opts.show_dir == false then
+    dir = ""
+  end
   if dir ~= "" then
-    local dir_start = #text
-    text = text .. "  " .. dir
-    hls[#hls + 1] = { dir_start, -1, "ScmDim" }
+    local shown = dir
+    local gap = 2
+    -- Leave the last column free so the row does not scroll sideways.
+    local target = width and width > 0 and (width - 1) or nil
+    local left_w = vim.fn.strdisplaywidth(text)
+    if target and left_w + gap + vim.fn.strdisplaywidth(shown) > target then
+      local room = target - left_w - gap
+      shown = room >= 4 and M.truncate(dir, room) or ""
+    end
+    if shown ~= "" then
+      local pad = gap
+      if target then
+        pad = math.max(target - left_w - vim.fn.strdisplaywidth(shown), gap)
+      end
+      text = text .. string.rep(" ", pad) .. shown
+      hls[#hls + 1] = { #text - #shown, #text, "ScmDim" }
+    end
   end
   add(text, hls, meta)
 end
@@ -166,7 +187,7 @@ local function render_status(add, _, width)
       if not collapsed then
         tree.render(add, list, {
           scope = section.key,
-          code_hl = CODE_HL,
+          width = width,
           meta = { section = section.key },
           item = function(entry)
             return { type = "file", entry = entry, key = entry.kind .. ":" .. entry.path }
@@ -175,7 +196,6 @@ local function render_status(add, _, width)
       end
     end
   end
-  _ = width
 
   if total == 0 then
     add("  No changes", { { 0, -1, "ScmDim" } })
@@ -376,9 +396,13 @@ function M.release_chrome(win)
   end)
 end
 
+--- Columns available for text, after the fold, sign, and number gutters.
 local function display_width()
   if M.is_open() then
-    return vim.api.nvim_win_get_width(state.panel.win)
+    local win = state.panel.win
+    local info = vim.fn.getwininfo(win)[1]
+    local off = info and info.textoff or 0
+    return math.max(vim.api.nvim_win_get_width(win) - off, 1)
   end
   return vim.o.columns
 end

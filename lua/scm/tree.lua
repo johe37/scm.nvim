@@ -117,7 +117,7 @@ end
 --- them and `J`/`K` walk over them.
 ---@param add fun(text: string, hls?: table[], meta?: table)
 ---@param entries table[]
----@param opts { scope: string, code_hl: table<string, string>, item: fun(entry: table): table, meta?: table }
+---@param opts { scope: string, width?: integer, item: fun(entry: table): table, meta?: table }
 function M.render(add, entries, opts)
   for _, row in ipairs(M.rows(entries, opts.scope)) do
     local indent = "   " .. string.rep("  ", row.depth)
@@ -138,26 +138,14 @@ function M.render(add, entries, opts)
         { #indent + #name, -1, "ScmDim" },
       }, meta)
     else
-      local entry = row.entry
-      local name = vim.fs.basename(entry.path)
-      local prefix = indent .. entry.code .. "  "
-      local text = prefix .. name
-      local name_hl = opts.code_hl[entry.code] or "ScmModified"
-      local hls = {
-        { #indent, #indent + #entry.code, name_hl },
-        { #prefix, #prefix + #name, name_hl },
-      }
-      -- In a tree the parent line carries the directory; a flat list has to
-      -- spell it out after the name.
-      if row.flat then
-        local dir = vim.fs.dirname(entry.path)
-        if dir ~= "." and dir ~= "" then
-          text = text .. "  " .. dir
-          hls[#hls + 1] = { #prefix + #name, -1, "ScmDim" }
-        end
-      end
-      meta.item = opts.item(entry)
-      add(text, hls, meta)
+      -- The file row (status color, rename arrow, right-aligned directory)
+      -- lives in the panel. A tree already shows the directory above the file,
+      -- so only the flat fallback repeats it.
+      meta.item = opts.item(row.entry)
+      require("scm.panel").add_file_row(add, row.entry, meta, opts.width, {
+        indent = indent,
+        show_dir = row.flat == true,
+      })
     end
   end
 end
