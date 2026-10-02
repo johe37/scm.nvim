@@ -19,6 +19,7 @@ local HIGHLIGHTS = {
   ScmDir = { link = "Directory" },
   ScmSha = { link = "Identifier" },
   ScmRef = { link = "Type" },
+  ScmAction = { link = "Keyword" },
   ScmPath = { link = "Normal" },
   ScmAdded = { link = "Added" },
   ScmModified = { link = "Changed" },

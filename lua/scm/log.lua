@@ -95,7 +95,8 @@ function M.render_log(add, view, width)
 
   if more then
     add("")
-    add("  m  load more", { { 0, -1, "ScmDim" } }, { item = { type = "more", key = "more" } })
+    local more = "  m  load more"
+    add(more, panel().highlight_keys(more, { "m" }), { item = { type = "more", key = "more" } })
   end
 end
 
@@ -148,7 +149,8 @@ function M.render_commit(add, view, width)
   })
 
   add("")
-  add("  D  full patch", { { 0, -1, "ScmDim" } }, { item = { type = "patch", key = "patch" } })
+  local patch_line = "  D  full patch"
+  add(patch_line, panel().highlight_keys(patch_line, { "D" }), { item = { type = "patch", key = "patch" } })
 end
 
 ---------------------------------------------------------------------------

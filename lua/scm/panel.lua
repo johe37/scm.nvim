@@ -38,6 +38,34 @@ function M.code_hl(code)
   return CODE_HL[code] or "ScmModified"
 end
 
+--- Dim `text`, with each exact `keys` entry drawn as an action.
+--- The first match of each key wins, so "m" highlights the binding and not "more".
+function M.highlight_keys(text, keys)
+  local spans = {}
+  for _, key in ipairs(keys) do
+    local start = text:find(key, 1, true)
+    if start then
+      spans[#spans + 1] = { start, start + #key - 1 }
+    end
+  end
+  table.sort(spans, function(a, b)
+    return a[1] < b[1]
+  end)
+  local hls = {}
+  local cursor = 1
+  for _, span in ipairs(spans) do
+    if span[1] > cursor then
+      hls[#hls + 1] = { cursor - 1, span[1] - 1, "ScmDim" }
+    end
+    hls[#hls + 1] = { span[1] - 1, span[2], "ScmAction" }
+    cursor = span[2] + 1
+  end
+  if cursor <= #text then
+    hls[#hls + 1] = { cursor - 1, #text, "ScmDim" }
+  end
+  return hls
+end
+
 --- One file row: a colored status letter, a name in that same color, and the
 --- directory dimmed on the right. A rename shows `old → new`. `file` needs
 --- `path` and `code`, and may carry `orig`. `width` is the content width.
@@ -444,8 +472,13 @@ local function render(buf)
   end
 
   add("")
-  local hint = view.kind == "status" and "  g? for help" or "  <BS> back · g? for help"
-  add(hint, { { 0, -1, "ScmDim" } })
+  local hint, keys
+  if view.kind == "status" then
+    hint, keys = "  g? for help", { "g?" }
+  else
+    hint, keys = "  <BS> back · g? for help", { "<BS>", "g?" }
+  end
+  add(hint, M.highlight_keys(hint, keys))
 
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
