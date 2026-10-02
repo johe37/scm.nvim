@@ -228,7 +228,14 @@ function M.open_patch(rev)
   vim.api.nvim_win_set_buf(win, buf)
   vim.api.nvim_set_current_win(win)
   vim.bo[buf].filetype = "diff"
-  vim.wo[win].winbar = "%#ScmDiffNew# " .. info.short .. " " .. info.subject:gsub("%%", "%%%%") .. " %*"
+  local width = vim.api.nvim_win_get_width(win)
+  local subject = (info.subject or ""):gsub("[\r\n]", " ")
+  -- Two extra columns: the winbar starts clipping with "<" when the text fills it.
+  subject = panel().truncate(subject, math.max(width - vim.fn.strdisplaywidth(info.short) - 4, 1))
+  local function esc(text)
+    return (text or ""):gsub("%%", "%%%%")
+  end
+  vim.wo[win].winbar = "%#ScmSha# " .. esc(info.short) .. " %#ScmTitle# " .. esc(subject) .. "%*"
   -- The patch takes the panel window, so it would otherwise keep the change-list statusline.
   if panel().is_active() then
     panel().release_chrome(win)
