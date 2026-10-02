@@ -188,7 +188,7 @@ local function restore_win_opts(win)
   state.diff.saved[win] = nil
 end
 
-local function setup_diff_win(win, label, hl)
+local function setup_diff_win(win, label, hl, note)
   if win == state.panel.win then
     return
   end
@@ -201,7 +201,17 @@ local function setup_diff_win(win, label, hl)
     vim.wo[win].foldcolumn = "0"
   end
   vim.wo[win].list = false
-  vim.wo[win].winbar = "%#" .. hl .. "# " .. label:gsub("%%", "%%%%") .. " %*"
+  local note_text = note and ("  " .. note) or ""
+  local budget = math.max(vim.api.nvim_win_get_width(win) - vim.fn.strdisplaywidth(note_text) - 1, 1)
+  local shown = require("scm.panel").truncate(label, budget)
+  local function esc(text)
+    return (text or ""):gsub("%%", "%%%%")
+  end
+  local bar = "%#" .. hl .. "# " .. esc(shown)
+  if note then
+    bar = bar .. "%#ScmDim#" .. esc(note_text)
+  end
+  vim.wo[win].winbar = bar .. "%*"
   -- A vsplit copies the panel's statusline, fillchars, and colorcolumn.
   require("scm.panel").release_chrome(win)
 end
@@ -401,7 +411,7 @@ function M.open(entry, opts)
   end
 
   setup_diff_win(left_win, left.label, "ScmDiffOld")
-  setup_diff_win(right_win, right.label .. (right.readonly and "  [read-only]" or "  [editable]"), "ScmDiffNew")
+  setup_diff_win(right_win, right.label, "ScmDiffNew", right.readonly and "read-only" or nil)
 
   state.diff.left_win, state.diff.right_win = left_win, right_win
   state.diff.left_buf, state.diff.right_buf = left_buf, right_buf

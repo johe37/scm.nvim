@@ -27,12 +27,34 @@ local HIGHLIGHTS = {
   ScmRenamed = { link = "Constant" },
   ScmConflict = { link = "DiagnosticError" },
   ScmUntracked = { link = "Added" },
-  ScmDiffOld = { link = "DiffDelete" },
-  ScmDiffNew = { link = "DiffAdd" },
 }
+
+--- Foreground only. DiffAdd and DiffDelete are line backgrounds, and a winbar
+--- label painted with one of those becomes a colored chip.
+local function inherit_fg(group)
+  local hl = vim.api.nvim_get_hl(0, { name = group, link = true })
+  local spec = { bold = true }
+  if hl.fg then
+    spec.fg = hl.fg
+  end
+  if hl.ctermfg then
+    spec.ctermfg = hl.ctermfg
+  end
+  if not spec.fg and not spec.ctermfg then
+    return { link = group, bold = true }
+  end
+  return spec
+end
 
 local function set_highlights()
   for name, spec in pairs(HIGHLIGHTS) do
+    vim.api.nvim_set_hl(0, name, vim.tbl_extend("keep", { default = true }, spec))
+  end
+  local dynamic = {
+    ScmDiffOld = inherit_fg("Removed"),
+    ScmDiffNew = inherit_fg("Added"),
+  }
+  for name, spec in pairs(dynamic) do
     vim.api.nvim_set_hl(0, name, vim.tbl_extend("keep", { default = true }, spec))
   end
 end
