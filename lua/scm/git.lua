@@ -84,6 +84,78 @@ function M.upstream(root)
   return { ahead = tonumber(ahead), behind = tonumber(behind) }
 end
 
+--- What the history view compares HEAD against.
+--- On master (or main) that is the upstream, then `origin/master`, so commits
+--- that are not published yet still stand out from the ones already there.
+--- On any other branch it is local `master`, then `main`. Nil when none exist.
+---@return string|nil
+function M.base_ref(root)
+  local branch = M.branch(root)
+  local candidates = {}
+  local function add(ref)
+    candidates[#candidates + 1] = ref
+  end
+  if branch == "master" or branch == "main" then
+    add("@{upstream}")
+  end
+  if branch ~= "master" then
+    add("master")
+  end
+  add("origin/master")
+  if branch ~= "main" then
+    add("main")
+  end
+  add("origin/main")
+  for _, ref in ipairs(candidates) do
+    local res = M.run({ "rev-parse", "--verify", "--quiet", ref .. "^{commit}" }, { cwd = root })
+    if res.code == 0 then
+      -- @{upstream} verifies, but the view should name the branch it points at.
+      local shown = M.run({ "rev-parse", "--abbrev-ref", ref }, { cwd = root })
+      local name = vim.trim(shown.stdout or "")
+      if shown.code == 0 and name ~= "" and name ~= "HEAD" then
+        return name
+      end
+      return ref
+    end
+  end
+  return nil
+end
+
+--- How many commits HEAD has that `ref` does not.
+function M.ahead_of(root, ref)
+  local res = M.run({ "rev-list", "--count", "HEAD", "--not", ref }, { cwd = root })
+  if res.code ~= 0 then
+    return 0
+  end
+  return tonumber(vim.trim(res.stdout)) or 0
+end
+
+--- Full shas from `shas` that are not contained in `ref`.
+--- `--no-walk` keeps the listed commits, and the negative ref still excludes
+--- everything reachable from it.
+---@param shas string[]
+---@return table<string, boolean>
+function M.not_on(root, ref, shas)
+  local set = {}
+  if not ref or #shas == 0 then
+    return set
+  end
+  local args = { "rev-list", "--no-walk" }
+  for _, sha in ipairs(shas) do
+    args[#args + 1] = sha
+  end
+  args[#args + 1] = "--not"
+  args[#args + 1] = ref
+  local res = M.run(args, { cwd = root })
+  if res.code ~= 0 then
+    return set
+  end
+  for line in vim.gsplit(res.stdout, "\n", { plain = true, trimempty = true }) do
+    set[line] = true
+  end
+  return set
+end
+
 local STATUS_LABEL = {
   M = "modified",
   A = "added",
@@ -329,6 +401,38 @@ function M.commit_info(root, rev)
   }
 end
 
+--- `git diff -z --name-status` and `diff-tree` share this shape: a status, then
+--- the path, and for a rename the old path before the new one.
+local function parse_name_status(stdout)
+  local files = {}
+  local fields = vim.split(stdout, "\0", { plain = true })
+  local i = 1
+  while fields[i] and fields[i] ~= "" do
+    local code = fields[i]:sub(1, 1)
+    -- The path sits in the next field. A rename has the old path there and the
+    -- new path after that.
+    local path, orig = fields[i + 1], nil
+    if code == "R" or code == "C" then
+      orig, path = fields[i + 1], fields[i + 2]
+      i = i + 3
+    else
+      i = i + 2
+    end
+    if path and path ~= "" then
+      files[#files + 1] = {
+        path = path,
+        orig = orig,
+        code = code,
+        label = STATUS_LABEL[code] or code,
+      }
+    end
+  end
+  table.sort(files, function(a, b)
+    return a.path < b.path
+  end)
+  return files
+end
+
 --- Files touched by a commit, as status entries the panel can render.
 --- Merge commits are compared against their first parent, which is what you
 --- almost always want to look at.
@@ -347,35 +451,53 @@ function M.commit_files(root, commit)
   if res.code ~= 0 then
     return {}
   end
-
-  local files = {}
-  local fields = vim.split(res.stdout, "\0", { plain = true })
-  local i = 1
-  while fields[i] and fields[i] ~= "" do
-    local code = fields[i]:sub(1, 1)
-    local path, orig = fields[i + 1], nil
-    if code == "R" or code == "C" then
-      orig, path = fields[i + 1], fields[i + 2]
-      i = i + 3
-    else
-      i = i + 2
-    end
-    if path then
-      files[#files + 1] = {
-        path = path,
-        orig = orig,
-        code = code,
-        label = STATUS_LABEL[code] or code,
-        kind = "commit_file",
-        sha = commit.sha,
-        parent = parent,
-      }
-    end
+  local files = parse_name_status(res.stdout)
+  for _, file in ipairs(files) do
+    file.kind = "commit_file"
+    file.sha = commit.sha
+    file.parent = parent
   end
-  table.sort(files, function(a, b)
-    return a.path < b.path
-  end)
   return files
+end
+
+--- What `sha` introduced after it left `base`. Three-dot: commits and files on
+--- this side, not changes that exist only on `base`.
+--- `on_base` means `sha` is already contained in `base`. Nil when git can't tell.
+---@return { on_base: boolean, commits?: integer, added?: integer, deleted?: integer, files?: table[] }|nil
+function M.since(root, base, sha)
+  local contained = M.run({ "merge-base", "--is-ancestor", sha, base }, { cwd = root })
+  if contained.code == 0 then
+    return { on_base = true }
+  end
+  -- A missing base is an error (not 1). Don't pretend the commit is new work.
+  if contained.code ~= 1 then
+    return nil
+  end
+  local range = base .. "..." .. sha
+  local count = M.run({ "rev-list", "--count", base .. ".." .. sha }, { cwd = root })
+  local stat = M.run({ "diff", "--shortstat", "--find-renames", range }, { cwd = root })
+  local names = M.run({ "diff", "-z", "--name-status", "--find-renames", range }, { cwd = root })
+  if count.code ~= 0 or stat.code ~= 0 or names.code ~= 0 then
+    return nil
+  end
+  local mb = M.run({ "merge-base", base, sha }, { cwd = root })
+  local parent = mb.code == 0 and vim.trim(mb.stdout) or nil
+  local summary = vim.trim(stat.stdout)
+  local files = parse_name_status(names.stdout)
+  for _, file in ipairs(files) do
+    -- Left side of a file diff is the fork point, which is what the three-dot
+    -- range actually compares.
+    file.kind = "commit_file"
+    file.sha = sha
+    file.parent = parent
+  end
+  return {
+    on_base = false,
+    commits = tonumber(vim.trim(count.stdout)) or 0,
+    added = tonumber(summary:match("(%d+) insertion")) or 0,
+    deleted = tonumber(summary:match("(%d+) deletion")) or 0,
+    files = files,
+  }
 end
 
 --- The whole commit as a unified patch.

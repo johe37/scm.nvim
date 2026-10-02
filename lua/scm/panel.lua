@@ -369,6 +369,12 @@ local function build_statusline(view, width)
       { text = " History", hl = "ScmTitle" },
       { text = "  " .. where, hl = "ScmBranch", flex = true },
     }
+    -- Repo history only. A file's log marks its own rows; this count is HEAD
+    -- against master, which would overstate one file.
+    if not view.path and view.ahead_count and view.ahead_count > 0 and view.base_ref then
+      left[#left + 1] = { text = " ↑" .. view.ahead_count, hl = "ScmAdded", drop = true }
+      left[#left + 1] = { text = " " .. view.base_ref, hl = "ScmBranch", drop = true }
+    end
   elseif view.kind == "help" then
     left = { { text = " Help", hl = "ScmTitle" } }
   elseif view.kind == "commit" then
@@ -676,6 +682,8 @@ local HELP = {
   "  m          load more commits",
   "  y          yank the commit sha",
   "  <BS>       back to the previous view",
+  "  commits above the ── line are not on that branch",
+  "  opening a commit lists what is new since master, above its own files",
   "",
   "Anywhere",
   "  J / K      next / previous item",

@@ -21,7 +21,8 @@ end
 ---------------------------------------------------------------------------
 
 --- One commit: sha, subject, ref decorations, and the author and date on the right.
-local function commit_line(commit, width)
+--- `ahead` paints the sha as an addition: this commit is not on the base ref.
+local function commit_line(commit, width, ahead)
   local ui = panel()
   local sha = commit.short or ""
   local subject = commit.subject or ""
@@ -56,7 +57,7 @@ local function commit_line(commit, width)
 
   local text = " " .. sha .. "  " .. subject
   local hls = {
-    { 1, 1 + #sha, "ScmSha" },
+    { 1, 1 + #sha, ahead and "ScmAdded" or "ScmSha" },
     { #sha + 3, #text, "ScmPath" },
   }
   if refs_text ~= "" then
@@ -75,8 +76,28 @@ local function commit_line(commit, width)
   return text, hls
 end
 
+--- The row that splits commits HEAD has from the ones already on `base`.
+--- Not an item: moving through the list skips it, and it is not remembered.
+local function base_line(add, base, reached, width)
+  local text = reached and (" ── " .. base) or (" ── ahead of " .. base)
+  text = clip(text, math.max(width - 1, 1))
+  local at = text:find(base, 1, true)
+  if not at then
+    add(text, { { 0, -1, "ScmDim" } })
+    return
+  end
+  local byte = at - 1
+  add(text, {
+    { 0, byte, "ScmDim" },
+    { byte, byte + #base, "ScmBranch" },
+    { byte + #base, #text, "ScmDim" },
+  })
+end
+
 --- @param view { path?: string, rev?: string, limit: integer }
 function M.render_log(add, view, width)
+  view.base_ref = nil
+  view.ahead_count = nil
   local commits = git.log(state.root, { limit = view.limit + 1, path = view.path, rev = view.rev })
   local more = #commits > view.limit
   if more then
@@ -88,9 +109,37 @@ function M.render_log(add, view, width)
     return
   end
 
-  for _, commit in ipairs(commits) do
-    local text, hls = commit_line(commit, width)
+  -- Commits above the line are the difference against master (or main).
+  -- On master itself the other side of that line is the published branch.
+  local base = git.base_ref(state.root)
+  local ahead = base and git.not_on(state.root, base, vim.tbl_map(function(commit)
+    return commit.sha
+  end, commits)) or {}
+  local any_ahead = false
+  local cut
+  for i, commit in ipairs(commits) do
+    if ahead[commit.sha] then
+      any_ahead = true
+    elseif any_ahead and not cut then
+      cut = i
+    end
+  end
+  if base and not view.path then
+    view.base_ref = base
+    view.ahead_count = git.ahead_of(state.root, base)
+  end
+
+  for i, commit in ipairs(commits) do
+    if cut == i then
+      add("")
+      base_line(add, base, true, width)
+    end
+    local text, hls = commit_line(commit, width, ahead[commit.sha])
     add(text, hls, { item = { type = "commit", commit = commit, key = "commit:" .. commit.sha } })
+  end
+  if base and any_ahead and not cut then
+    add("")
+    base_line(add, base, false, width)
   end
 
   if more then
@@ -103,6 +152,73 @@ end
 ---------------------------------------------------------------------------
 -- Single commit
 ---------------------------------------------------------------------------
+
+--- `prefix` is the dim or section lead-in; `base` is drawn as a branch name.
+local function ref_heading(add, prefix, base, prefix_hl, width)
+  local text = clip(prefix .. base, math.max(width - 1, 1))
+  local hls = { { 0, math.min(#prefix, #text), prefix_hl } }
+  if #prefix < #text then
+    hls[#hls + 1] = { #prefix, #text, "ScmBranch" }
+  end
+  add(text, hls)
+end
+
+--- The pile of work this commit has that `master` (or its published tip) does
+--- not. Drawn above the commit's own files, because one commit against its
+--- parent hides a long run of earlier commits.
+--- @return boolean ahead true when the comparison listed files
+local function render_since(add, commit, width)
+  local base = git.base_ref(state.root)
+  if not base then
+    return false
+  end
+  local since = git.since(state.root, base, commit.sha)
+  if not since then
+    return false
+  end
+  add("")
+  if since.on_base then
+    ref_heading(add, " on ", base, "ScmDim", width)
+    return false
+  end
+  ref_heading(add, " Since ", base, "ScmSection", width)
+
+  local front = string.format(
+    "  %d %s · %d %s",
+    since.commits,
+    since.commits == 1 and "commit" or "commits",
+    #since.files,
+    #since.files == 1 and "file" or "files"
+  )
+  local hls = { { 0, #front, "ScmPath" } }
+  local text = front
+  if since.added > 0 then
+    local at = #text
+    text = text .. "  +" .. since.added
+    hls[#hls + 1] = { at, #text, "ScmAdded" }
+  end
+  if since.deleted > 0 then
+    local at = #text
+    text = text .. "  -" .. since.deleted
+    hls[#hls + 1] = { at, #text, "ScmDeleted" }
+  end
+  text = clip(text, math.max(width - 1, 1))
+  for _, hl in ipairs(hls) do
+    if hl[2] > #text then
+      hl[2] = #text
+    end
+  end
+  add(text, hls)
+
+  require("scm.tree").render(add, since.files, {
+    scope = "since:" .. commit.short,
+    width = width,
+    item = function(file)
+      return { type = "commit_file", file = file, key = "vs:" .. file.path }
+    end,
+  })
+  return true
+end
 
 --- @param view { sha: string }
 function M.render_commit(add, view, width)
@@ -127,6 +243,8 @@ function M.render_commit(add, view, width)
     add(" merge of " .. #commit.parents .. " parents (vs first)", { { 0, -1, "ScmDim" } })
   end
 
+  local ahead = render_since(add, commit, width)
+
   if commit.body ~= "" then
     add("")
     for _, line in ipairs(vim.split(commit.body, "\n", { plain = true })) do
@@ -137,7 +255,10 @@ function M.render_commit(add, view, width)
   local files = git.commit_files(state.root, commit)
   view.files = files
   add("")
-  add(string.format(" Files (%d)", #files), { { 0, -1, "ScmSection" } })
+  -- The list above is already every file changed since master. This one is
+  -- only what the commit itself did, so the two headings must not both say Files.
+  local files_heading = ahead and string.format(" This commit (%d)", #files) or string.format(" Files (%d)", #files)
+  add(files_heading, { { 0, -1, "ScmSection" } })
   require("scm.tree").render(add, files, {
     -- Scoped to the commit so folding one does not fold every other commit's
     -- view of the same directory.
