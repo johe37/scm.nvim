@@ -74,6 +74,8 @@ function M.open(opts)
   vim.wo[win].winbar = "%#ScmTitle# Commit message %*"
   vim.wo[win].number = false
   vim.bo[buf].filetype = "gitcommit"
+  -- The split copies the panel window, including its statusline.
+  require("scm.panel").release_chrome(win)
 
   local function commit()
     local message = message_of(buf)

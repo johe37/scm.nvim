@@ -93,22 +93,17 @@ local function render_status(add, _, width)
   local status = git.status(state.root)
   state.panel.status = status
 
-  add(" Source Control", { { 0, -1, "ScmTitle" } })
-
-  local branch_line = " " .. git.branch(state.root)
-  local upstream = git.upstream(state.root)
-  if upstream and (upstream.ahead > 0 or upstream.behind > 0) then
-    branch_line = branch_line .. string.format("  ^%d v%d", upstream.ahead, upstream.behind)
-  end
-  add(branch_line, { { 0, -1, "ScmBranch" } })
-  add(" " .. vim.fs.basename(state.root or ""), { { 0, -1, "ScmDim" } })
-
   local total = 0
+  local started = false
   for _, section in ipairs(SECTIONS) do
     local list = status[section.key] or {}
     total = total + #list
     if #list > 0 then
-      add("")
+      -- The first section sits on line 1. The statusline is the header now.
+      if started then
+        add("")
+      end
+      started = true
       local collapsed = state.panel.collapsed[section.key]
       add(
         string.format(" %s %s (%d)", collapsed and ">" or "v", section.title, #list),
@@ -130,9 +125,202 @@ local function render_status(add, _, width)
   _ = width
 
   if total == 0 then
-    add("")
     add("  No changes", { { 0, -1, "ScmDim" } })
   end
+end
+
+--- Shorten `text` to `max` display columns, keeping room for an ellipsis.
+function M.truncate(text, max)
+  text = text or ""
+  if max <= 0 then
+    return ""
+  end
+  if vim.fn.strdisplaywidth(text) <= max then
+    return text
+  end
+  local budget = max - 1
+  if budget <= 0 then
+    return "…"
+  end
+  local width = 0
+  local bytes = 0
+  for i = 0, vim.fn.strchars(text) - 1 do
+    local ch = vim.fn.strcharpart(text, i, 1)
+    local dw = vim.fn.strdisplaywidth(ch)
+    if width + dw > budget then
+      break
+    end
+    width = width + dw
+    bytes = bytes + #ch
+  end
+  return text:sub(1, bytes) .. "…"
+end
+
+local function stl_escape(text)
+  return (text or ""):gsub("%%", "%%%%")
+end
+
+local function segments_width(parts)
+  local n = 0
+  for _, part in ipairs(parts) do
+    n = n + vim.fn.strdisplaywidth(part.text)
+  end
+  return n
+end
+
+--- Fit `left` beside `right`. Drop optional segments first (counts, ahead/behind),
+--- then shorten the one flexible segment (branch, path, or subject).
+local function fit_statusline(left, right, width)
+  local right_w = right and vim.fn.strdisplaywidth(right.text) or 0
+  local budget = width - right_w
+  if right and budget < 10 then
+    right = nil
+    budget = width
+  end
+  local guard = #left + 2
+  while segments_width(left) > budget and #left > 0 and guard > 0 do
+    guard = guard - 1
+    local dropped
+    for i = #left, 1, -1 do
+      if left[i].drop then
+        table.remove(left, i)
+        dropped = true
+        break
+      end
+    end
+    if not dropped then
+      local flex
+      for i, part in ipairs(left) do
+        if part.flex then
+          flex = i
+        end
+      end
+      if flex then
+        local others = segments_width(left) - vim.fn.strdisplaywidth(left[flex].text)
+        local room = budget - others
+        if room < 1 then
+          table.remove(left, flex)
+        else
+          left[flex].text = M.truncate(left[flex].text, room)
+          left[flex].flex = nil
+        end
+      else
+        table.remove(left)
+      end
+    end
+  end
+  return left, right
+end
+
+local function join_statusline(left, right)
+  local chunks = {}
+  for _, part in ipairs(left) do
+    chunks[#chunks + 1] = "%#" .. part.hl .. "#" .. stl_escape(part.text)
+  end
+  if right then
+    chunks[#chunks + 1] = "%="
+    chunks[#chunks + 1] = "%#" .. right.hl .. "#" .. stl_escape(right.text)
+  end
+  chunks[#chunks + 1] = "%#StatusLine#"
+  return table.concat(chunks)
+end
+
+local function count_segments(status)
+  local specs = {
+    { "conflicted", "ScmConflict", function(n)
+      return n == 1 and "conflict" or "conflicts"
+    end },
+    { "staged", "ScmDim", function()
+      return "staged"
+    end },
+    { "unstaged", "ScmDim", function()
+      return "changed"
+    end },
+    { "untracked", "ScmDim", function()
+      return "untracked"
+    end },
+  }
+  local parts = {}
+  for _, spec in ipairs(specs) do
+    local n = #(status[spec[1]] or {})
+    if n > 0 then
+      local gap = #parts == 0 and "  " or " · "
+      parts[#parts + 1] = { text = gap .. n .. " " .. spec[3](n), hl = spec[2] }
+    end
+  end
+  if #parts == 0 then
+    parts[1] = { text = "  clean", hl = "ScmDim" }
+  end
+  return parts
+end
+
+--- Branch, ahead/behind, and counts. Cached during render: the statusline is
+--- redrawn far more often than the panel refreshes, and it must not shell out.
+local function build_statusline(view, width)
+  local root = state.root
+  local repo = vim.fs.basename(root or "")
+  local right = repo ~= "" and { text = " " .. repo .. " ", hl = "ScmDim" } or nil
+  local left
+
+  if view.kind == "log" then
+    local where = view.path or (root and git.branch(root)) or ""
+    left = {
+      { text = " History", hl = "ScmTitle" },
+      { text = "  " .. where, hl = "ScmBranch", flex = true },
+    }
+  elseif view.kind == "commit" then
+    local commit = view.commit
+    if commit then
+      local subject = (commit.subject or ""):gsub("[\r\n]", " ")
+      left = {
+        { text = " " .. commit.short, hl = "ScmSha" },
+        { text = "  " .. subject, hl = "ScmTitle", flex = true },
+      }
+    else
+      left = { { text = " Commit", hl = "ScmTitle" } }
+    end
+  else
+    local branch = root and git.branch(root) or ""
+    left = {
+      { text = " Source Control", hl = "ScmTitle" },
+      { text = "  " .. branch, hl = "ScmBranch", flex = true },
+    }
+    local upstream = root and git.upstream(root)
+    if upstream then
+      if upstream.ahead > 0 then
+        left[#left + 1] = { text = " ↑" .. upstream.ahead, hl = "ScmAdded", drop = true }
+      end
+      if upstream.behind > 0 then
+        left[#left + 1] = { text = " ↓" .. upstream.behind, hl = "ScmDeleted", drop = true }
+      end
+    end
+    for _, part in ipairs(count_segments(state.panel.status)) do
+      part.drop = true
+      left[#left + 1] = part
+    end
+  end
+
+  left, right = fit_statusline(left, right, width)
+  return join_statusline(left, right)
+end
+
+local function window_width()
+  if M.is_open() then
+    return vim.api.nvim_win_get_width(state.panel.win)
+  end
+  return vim.o.columns
+end
+
+--- The panel's statusline, fillchars, and colorcolumn are not for a diff,
+--- patch, or commit message. Put the window back on the global values; the
+--- panel sets its own again when the list returns.
+function M.release_chrome(win)
+  if not win_valid(win) then
+    return
+  end
+  vim.api.nvim_win_call(win, function()
+    vim.cmd("setlocal statusline< fillchars< colorcolumn<")
+  end)
 end
 
 local function display_width()
@@ -171,6 +359,11 @@ local function render(buf)
     require("scm.log").render_commit(add, view, width)
   else
     render_status(add, view, width)
+  end
+
+  state.panel.statusline = build_statusline(view, window_width())
+  if M.is_open() then
+    vim.wo[state.panel.win].statusline = state.panel.statusline
   end
 
   add("")
@@ -590,6 +783,7 @@ local WIN_OPTS = {
   "winbar",
   "colorcolumn",
   "fillchars",
+  "statusline",
 }
 
 local function create_buf()
@@ -794,8 +988,11 @@ function M.close()
     win = ordinary_win()
   end
   if win_valid(win) then
-    M.restore_window(win)
+    -- Put the file back first. Neovim remembers window-local options per buffer
+    -- in a window, so restoring before the switch gets overwritten by whatever
+    -- the diff last left on this file.
     vim.api.nvim_win_set_buf(win, fallback_buf(restore))
+    M.restore_window(win)
     vim.api.nvim_set_current_win(win)
   end
 end

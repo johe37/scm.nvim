@@ -32,15 +32,6 @@ function M.render_log(add, view, width)
     table.remove(commits)
   end
 
-  add(" History", { { 0, -1, "ScmTitle" } })
-  if view.path then
-    add(" " .. fit(view.path, width - 2), { { 0, -1, "ScmBranch" } })
-  else
-    add(" " .. git.branch(state.root), { { 0, -1, "ScmBranch" } })
-  end
-  add(" " .. vim.fs.basename(state.root or ""), { { 0, -1, "ScmDim" } })
-  add("")
-
   if #commits == 0 then
     add("  No commits", { { 0, -1, "ScmDim" } })
     return
@@ -203,6 +194,10 @@ function M.open_patch(rev)
   vim.api.nvim_set_current_win(win)
   vim.bo[buf].filetype = "diff"
   vim.wo[win].winbar = "%#ScmDiffNew# " .. info.short .. " " .. info.subject:gsub("%%", "%%%%") .. " %*"
+  -- The patch takes the panel window, so it would otherwise keep the change-list statusline.
+  if panel().is_active() then
+    panel().release_chrome(win)
+  end
   local function back()
     if panel().is_active() and panel().show(win) then
       return

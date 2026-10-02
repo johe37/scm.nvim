@@ -167,6 +167,11 @@ local function save_win_opts(win)
     foldcolumn = vim.wo[win].foldcolumn,
     list = vim.wo[win].list,
     winbar = vim.wo[win].winbar,
+    -- The panel may have been using this window. Remember its chrome so a
+    -- diff opened from a normal editor can give the window back unchanged.
+    statusline = vim.wo[win].statusline,
+    fillchars = vim.wo[win].fillchars,
+    colorcolumn = vim.wo[win].colorcolumn,
   }
 end
 
@@ -197,6 +202,8 @@ local function setup_diff_win(win, label, hl)
   end
   vim.wo[win].list = false
   vim.wo[win].winbar = "%#" .. hl .. "# " .. label:gsub("%%", "%%%%") .. " %*"
+  -- A vsplit copies the panel's statusline, fillchars, and colorcolumn.
+  require("scm.panel").release_chrome(win)
 end
 
 --- Close both side-by-side windows. If the panel session is still active, the
@@ -463,9 +470,11 @@ function M.open_working_tree()
   if not win_valid(win) then
     win = M.main_win()
   end
-  panel.restore_window(win)
   vim.api.nvim_set_current_win(win)
   vim.cmd("edit " .. vim.fn.fnameescape(abs))
+  -- After the file is showing: switching buffers restores window options that
+  -- belonged to the diff, including the panel statusline.
+  panel.restore_window(win)
   local last = vim.api.nvim_buf_line_count(0)
   pcall(vim.api.nvim_win_set_cursor, 0, { math.min(cursor[1], last), cursor[2] })
 end
