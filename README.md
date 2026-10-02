@@ -14,21 +14,21 @@ No dependencies beyond `git` and Neovim ≥ 0.10.
 ```
 :Scm  —  the change list, full window
 
+ statusline:  Source Control  main ↑1  1 staged · 2 changed      nvim
 ┌──────────────────────────────────────────────────────────┐
-│ Source Control                                           │
-│ master                                                   │
-│ nvim                                                     │
-│                                                          │
-│ v Staged Changes (1)                                     │
+│ ▾ Staged Changes (1)                                     │
 │   lua/plugins/ (1)                                       │
 │     M  scm.lua                                           │
-│ v Changes (3)                                            │
+│                                                          │
+│ ▾ Changes (3)                                            │
 │   lua/ (2)                                               │
 │     M  init.lua                                          │
 │     D  gone.lua                                          │
 │   M  README.md                                           │
-│ v Untracked (1)                                          │
+│ ▾ Untracked (1)                                          │
 │   ?  scratch.txt                                         │
+│                                                          │
+│   g? for help                                            │
 └──────────────────────────────────────────────────────────┘
 
 <CR>  —  only the diff     q / <BS>  —  back to the list
@@ -108,7 +108,7 @@ Anywhere:
 | `J` / `K` | Jump to the next / previous item |
 | `r` | Refresh |
 | `q` | Back one view; on the change list, close |
-| `g?` | Show this list |
+| `g?` | Open this keymap list in the panel |
 
 ## Diff mappings
 
@@ -158,10 +158,13 @@ require("scm").setup({
 })
 ```
 
-Highlight groups (all `default`-linked, so a colorscheme can override them):
+Highlight groups (set with `default`, so a colorscheme can override them):
 `ScmTitle`, `ScmSection`, `ScmBranch`, `ScmDim`, `ScmDir`, `ScmPath`, `ScmAdded`,
 `ScmModified`, `ScmDeleted`, `ScmRenamed`, `ScmConflict`, `ScmUntracked`,
-`ScmSha`, `ScmDiffOld`, `ScmDiffNew`.
+`ScmSha`, `ScmRef`, `ScmAction`, `ScmDiffOld`, `ScmDiffNew`.
+`ScmDiffOld` and `ScmDiffNew` copy the foreground of `Removed` and `Added`
+for the diff labels. `ScmRef` marks branch and tag decorations in the log,
+and `ScmAction` marks a key you can press.
 
 ## Layout
 
@@ -173,6 +176,7 @@ scm.nvim/
 │   ├── state.lua    -- shared window/buffer state
 │   ├── git.lua      -- git CLI wrapper (status, log, blobs, stage, commit, blame)
 │   ├── panel.lua    -- the panel: window, views, keymaps
+│   ├── tree.lua     -- directory grouping for the file lists
 │   ├── log.lua      -- the history views (commit list, commit details, blame)
 │   ├── diff.lua     -- the side-by-side view
 │   └── commit.lua   -- the commit message buffer
