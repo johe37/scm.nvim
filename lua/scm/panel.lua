@@ -39,21 +39,49 @@ function M.code_hl(code)
 end
 
 --- One file row: a colored status letter, a name in that same color, and the
---- directory dimmed after it. `file` needs `path` and `code`, and may carry `orig`.
+--- directory dimmed after it. A rename shows `old → new`. `file` needs `path`
+--- and `code`, and may carry `orig`.
 function M.add_file_row(add, file, meta)
   local base = vim.fs.basename(file.path)
   local dir = vim.fs.dirname(file.path)
   dir = (dir == "." or dir == "") and "" or dir
-  local prefix = string.format("   %s  ", file.code)
+  local orig = file.orig
+  local renamed = orig and orig ~= "" and orig ~= file.path
   local name_hl = M.code_hl(file.code)
-  local text = prefix .. base
-  local hls = {
-    { 3, 4, name_hl },
-    { #prefix, #prefix + #base, name_hl },
-  }
+  local text = string.format("   %s  ", file.code)
+  local hls = { { 3, 4, name_hl } }
+
+  if renamed then
+    local old_name, new_name
+    -- The directory column is the shared parent. A move across directories
+    -- has no shared parent, so both paths stay in the name.
+    if vim.fs.dirname(orig) == vim.fs.dirname(file.path) then
+      old_name = vim.fs.basename(orig)
+      new_name = base
+    else
+      old_name = orig
+      new_name = file.path
+      dir = ""
+    end
+    local old_start = #text
+    text = text .. old_name
+    local arrow_start = #text
+    text = text .. " → "
+    local new_start = #text
+    text = text .. new_name
+    hls[#hls + 1] = { old_start, arrow_start, "ScmDim" }
+    hls[#hls + 1] = { arrow_start, new_start, "ScmDim" }
+    hls[#hls + 1] = { new_start, #text, name_hl }
+  else
+    local name_start = #text
+    text = text .. base
+    hls[#hls + 1] = { name_start, #text, name_hl }
+  end
+
   if dir ~= "" then
+    local dir_start = #text
     text = text .. "  " .. dir
-    hls[#hls + 1] = { #prefix + #base, -1, "ScmDim" }
+    hls[#hls + 1] = { dir_start, -1, "ScmDim" }
   end
   add(text, hls, meta)
 end
