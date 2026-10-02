@@ -5,6 +5,8 @@ local state = require("scm.state")
 
 local M = {}
 
+local ns = vim.api.nvim_create_namespace("scm.commit")
+
 local function message_of(buf)
   local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
   local kept = {}
@@ -50,8 +52,25 @@ function M.open(opts)
     lines[#lines + 1] = "# Amending " .. git.branch(state.root) .. "'s last commit."
   end
   lines[#lines + 1] = "#"
+  local marks = {}
   for _, entry in ipairs(status.staged) do
-    lines[#lines + 1] = string.format("#   %s  %s", entry.label, entry.path)
+    local hl = require("scm.panel").code_hl(entry.code)
+    local renamed = entry.orig and entry.orig ~= "" and entry.orig ~= entry.path
+    local name = renamed and (entry.orig .. " → " .. entry.path) or entry.path
+    local line = string.format("#   %s  %s", entry.code, name)
+    lines[#lines + 1] = line
+    local lnum = #lines - 1
+    marks[#marks + 1] = { lnum, 4, 5, hl }
+    if renamed then
+      local prefix = "#   " .. entry.code .. "  "
+      local old_end = #prefix + #entry.orig
+      local new_start = old_end + #" → "
+      marks[#marks + 1] = { lnum, #prefix, old_end, "ScmDim" }
+      marks[#marks + 1] = { lnum, old_end, new_start, "ScmDim" }
+      marks[#marks + 1] = { lnum, new_start, #line, hl }
+    else
+      marks[#marks + 1] = { lnum, 7, #line, hl }
+    end
   end
 
   local existing = vim.fn.bufnr("scm://COMMIT_MSG")
@@ -76,6 +95,18 @@ function M.open(opts)
   vim.bo[buf].filetype = "gitcommit"
   -- The split copies the panel window, including its statusline.
   require("scm.panel").release_chrome(win)
+  -- 72 is the git convention. Spell and wrap are for the message, not the list.
+  vim.wo[win].colorcolumn = "72"
+  vim.wo[win].spell = true
+  vim.wo[win].wrap = true
+  vim.wo[win].linebreak = true
+  for _, mark in ipairs(marks) do
+    vim.api.nvim_buf_set_extmark(buf, ns, mark[1], mark[2], {
+      end_col = mark[3],
+      hl_group = mark[4],
+      priority = 200,
+    })
+  end
 
   local function commit()
     local message = message_of(buf)
