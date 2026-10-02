@@ -508,44 +508,84 @@ local function render(buf)
   state.panel.sections = sections
 end
 
+--- First line of the item with this key. An item can occupy more than one line.
+local function line_of_key(key)
+  local best
+  for lnum, item in pairs(state.panel.entries) do
+    if item.key == key and (not best or lnum < best) then
+      best = lnum
+    end
+  end
+  return best
+end
+
+local function place_cursor(lnum, center)
+  if not lnum then
+    return false
+  end
+  pcall(vim.api.nvim_win_set_cursor, state.panel.win, { lnum, 0 })
+  if center then
+    -- The list was just redrawn from the top. Put the item in view, not on the
+    -- last row of the window.
+    vim.api.nvim_win_call(state.panel.win, function()
+      pcall(vim.cmd, "normal! zz")
+    end)
+  end
+  return true
+end
+
+local function place_first_item()
+  for lnum = 1, vim.api.nvim_buf_line_count(state.panel.buf) do
+    if state.panel.entries[lnum] then
+      return place_cursor(lnum, false)
+    end
+  end
+  return place_cursor(1, false)
+end
+
+--- Remember which row to come back to. A header has no item, so the previous
+--- row is kept.
+local function remember_cursor(view)
+  local item = M.current_item()
+  if view and item and item.key then
+    view.cursor_key = item.key
+  end
+end
+
 --- Redraw the current view, keeping the cursor on the same item when possible.
----@param opts? { cursor?: "keep"|"top" }
+---@param opts? { cursor?: "keep"|"top"|string }
 function M.refresh(opts)
   opts = opts or {}
+  local mode = opts.cursor or "keep"
+  local restore_key = (mode ~= "keep" and mode ~= "top") and mode or nil
   if not (state.panel.buf and vim.api.nvim_buf_is_valid(state.panel.buf) and state.root) then
     return
   end
-  local keep = opts.cursor ~= "top" and M.current_item() or nil
+  local keep = mode == "keep" and M.current_item() or nil
   render(state.panel.buf)
   if not M.is_open() then
     return
   end
-  if opts.cursor == "top" then
+  if restore_key and place_cursor(line_of_key(restore_key), true) then
+    return
+  end
+  if mode == "top" or restore_key then
     -- Land on the first selectable line of the new view.
-    for lnum = 1, vim.api.nvim_buf_line_count(state.panel.buf) do
-      if state.panel.entries[lnum] then
-        pcall(vim.api.nvim_win_set_cursor, state.panel.win, { lnum, 0 })
-        return
-      end
-    end
-    pcall(vim.api.nvim_win_set_cursor, state.panel.win, { 1, 0 })
+    place_first_item()
     return
   end
   if keep then
+    if place_cursor(line_of_key(keep.key), false) then
+      return
+    end
+    -- The file may have moved between sections (e.g. it was just staged).
     local fallback
     for lnum, item in pairs(state.panel.entries) do
-      if item.key == keep.key then
-        pcall(vim.api.nvim_win_set_cursor, state.panel.win, { lnum, 0 })
-        return
-      end
-      -- The file may have moved between sections (e.g. it was just staged).
       if keep.entry and item.entry and item.entry.path == keep.entry.path then
         fallback = math.min(fallback or math.huge, lnum)
       end
     end
-    if fallback then
-      pcall(vim.api.nvim_win_set_cursor, state.panel.win, { fallback, 0 })
-    end
+    place_cursor(fallback, false)
   end
 end
 
@@ -559,6 +599,7 @@ end
 function M.set_view(view, opts)
   opts = opts or {}
   if not opts.replace and state.panel.view then
+    remember_cursor(state.panel.view)
     state.panel.stack[#state.panel.stack + 1] = state.panel.view
   end
   state.panel.view = view
@@ -566,10 +607,11 @@ function M.set_view(view, opts)
 end
 
 --- Back to the view we came from; from the top level that means the status view.
+--- The cursor returns to the row that opened this view, not the top of the list.
 function M.back()
   local previous = table.remove(state.panel.stack)
   state.panel.view = previous or { kind = "status" }
-  M.refresh({ cursor = "top" })
+  M.refresh({ cursor = (previous and previous.cursor_key) or "top" })
 end
 
 --- The working-tree change list. Used by `:Scm` / prefix+gg so history is not
@@ -1032,6 +1074,9 @@ function M.hide()
   if not M.is_open() then
     return nil
   end
+  -- A diff or patch takes the window. Remember the row so coming back lands
+  -- on the commit or file that was open, not on whatever line the diff used.
+  remember_cursor(state.panel.view)
   local win = state.panel.win
   state.panel.hidden = true
   state.panel.win = nil
@@ -1055,7 +1100,8 @@ function M.show(win)
   setup_win(win)
   state.panel.win = win
   state.panel.hidden = false
-  M.refresh()
+  local key = state.panel.view and state.panel.view.cursor_key
+  M.refresh(key and { cursor = key } or { cursor = "top" })
   vim.api.nvim_set_current_win(win)
   return true
 end
