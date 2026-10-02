@@ -94,7 +94,7 @@ function M.render_commit(add, view, width)
   local files = git.commit_files(state.root, commit)
   view.files = files
   add("")
-  add(string.format(" v Files (%d)", #files), { { 0, -1, "ScmSection" } })
+  add(string.format(" Files (%d)", #files), { { 0, -1, "ScmSection" } })
   require("scm.tree").render(add, files, {
     -- Scoped to the commit so folding one does not fold every other commit's
     -- view of the same directory.
