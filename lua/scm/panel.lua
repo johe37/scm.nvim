@@ -588,6 +588,8 @@ local WIN_OPTS = {
   "spell",
   "statuscolumn",
   "winbar",
+  "colorcolumn",
+  "fillchars",
 }
 
 local function create_buf()
@@ -618,6 +620,12 @@ local function setup_win(win)
   wo.spell = false
   wo.statuscolumn = ""
   wo.winbar = ""
+  -- A color column is a code-editing guide. It should not cut through the list.
+  wo.colorcolumn = ""
+  -- The default end-of-buffer marker is "~", which reads as a file rather than a view.
+  vim.api.nvim_win_call(win, function()
+    vim.opt_local.fillchars:append({ eob = " " })
+  end)
 end
 
 local function save_win_opts(win)
