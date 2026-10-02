@@ -157,9 +157,10 @@ local function render_status(add, _, width)
       end
       started = true
       local collapsed = state.panel.collapsed[section.key]
+      local header_hl = section.key == "conflicted" and "ScmConflict" or "ScmSection"
       add(
         string.format(" %s %s (%d)", collapsed and "▸" or "▾", section.title, #list),
-        { { 0, -1, "ScmSection" } },
+        { { 0, -1, header_hl } },
         { section = section.key }
       )
       if not collapsed then
