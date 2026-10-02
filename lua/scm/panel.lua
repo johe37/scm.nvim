@@ -106,7 +106,7 @@ local function render_status(add, _, width)
       started = true
       local collapsed = state.panel.collapsed[section.key]
       add(
-        string.format(" %s %s (%d)", collapsed and ">" or "v", section.title, #list),
+        string.format(" %s %s (%d)", collapsed and "▸" or "▾", section.title, #list),
         { { 0, -1, "ScmSection" } },
         { section = section.key }
       )
