@@ -142,9 +142,10 @@ function M.render(add, entries, opts)
       local name = vim.fs.basename(entry.path)
       local prefix = indent .. entry.code .. "  "
       local text = prefix .. name
+      local name_hl = opts.code_hl[entry.code] or "ScmModified"
       local hls = {
-        { #indent, #indent + #entry.code, opts.code_hl[entry.code] or "ScmModified" },
-        { #prefix, #prefix + #name, entry.code == "D" and "ScmDeleted" or "ScmPath" },
+        { #indent, #indent + #entry.code, name_hl },
+        { #prefix, #prefix + #name, name_hl },
       }
       -- In a tree the parent line carries the directory; a flat list has to
       -- spell it out after the name.

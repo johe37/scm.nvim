@@ -22,9 +22,9 @@ local HIGHLIGHTS = {
   ScmAdded = { link = "Added" },
   ScmModified = { link = "Changed" },
   ScmDeleted = { link = "Removed" },
-  ScmRenamed = { link = "Changed" },
+  ScmRenamed = { link = "Constant" },
   ScmConflict = { link = "DiagnosticError" },
-  ScmUntracked = { link = "Comment" },
+  ScmUntracked = { link = "Added" },
   ScmDiffOld = { link = "DiffDelete" },
   ScmDiffNew = { link = "DiffAdd" },
 }

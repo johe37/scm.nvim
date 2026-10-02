@@ -34,6 +34,30 @@ local CODE_HL = {
   ["?"] = "ScmUntracked",
 }
 
+function M.code_hl(code)
+  return CODE_HL[code] or "ScmModified"
+end
+
+--- One file row: a colored status letter, a name in that same color, and the
+--- directory dimmed after it. `file` needs `path` and `code`, and may carry `orig`.
+function M.add_file_row(add, file, meta)
+  local base = vim.fs.basename(file.path)
+  local dir = vim.fs.dirname(file.path)
+  dir = (dir == "." or dir == "") and "" or dir
+  local prefix = string.format("   %s  ", file.code)
+  local name_hl = M.code_hl(file.code)
+  local text = prefix .. base
+  local hls = {
+    { 3, 4, name_hl },
+    { #prefix, #prefix + #base, name_hl },
+  }
+  if dir ~= "" then
+    text = text .. "  " .. dir
+    hls[#hls + 1] = { #prefix + #base, -1, "ScmDim" }
+  end
+  add(text, hls, meta)
+end
+
 local function win_valid(win)
   return win and vim.api.nvim_win_is_valid(win)
 end
