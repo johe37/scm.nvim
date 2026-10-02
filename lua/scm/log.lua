@@ -12,12 +12,8 @@ local function panel()
   return require("scm.panel")
 end
 
---- Truncate to the panel width so long subjects do not need horizontal scrolling.
-local function fit(text, width)
-  if vim.fn.strdisplaywidth(text) <= width then
-    return text
-  end
-  return vim.fn.strcharpart(text, 0, math.max(width - 1, 1)) .. "…"
+local function clip(text, width)
+  return panel().truncate(text, width)
 end
 
 ---------------------------------------------------------------------------
@@ -116,12 +112,16 @@ function M.render_commit(add, view, width)
   end
   view.commit = commit
 
-  add(" " .. commit.short, { { 0, -1, "ScmTitle" } })
+  add(" " .. commit.short, { { 1, 1 + #commit.short, "ScmSha" } })
   for _, line in ipairs(vim.split(commit.subject, "\n", { plain = true })) do
-    add(" " .. fit(line, width - 2), { { 0, -1, "ScmPath" } })
+    add(" " .. clip(line, width - 2), { { 0, -1, "ScmTitle" } })
   end
-  add(" " .. fit(commit.author .. " · " .. commit.rel_date, width - 2), { { 0, -1, "ScmBranch" } })
-  add(" " .. fit(commit.date, width - 2), { { 0, -1, "ScmDim" } })
+  add(" " .. clip(commit.author, width - 2), { { 0, -1, "ScmBranch" } })
+  local when = commit.rel_date or ""
+  if commit.date and commit.date ~= "" then
+    when = when .. "  ·  " .. commit.date
+  end
+  add(" " .. clip(when, width - 2), { { 0, -1, "ScmDim" } })
   if #commit.parents > 1 then
     add(" merge of " .. #commit.parents .. " parents (vs first)", { { 0, -1, "ScmDim" } })
   end
@@ -129,7 +129,7 @@ function M.render_commit(add, view, width)
   if commit.body ~= "" then
     add("")
     for _, line in ipairs(vim.split(commit.body, "\n", { plain = true })) do
-      add(" " .. fit(line, width - 2), { { 0, -1, "ScmDim" } })
+      add(" " .. clip(line, width - 2), { { 0, -1, "ScmDim" } })
     end
   end
 
