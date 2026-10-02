@@ -24,6 +24,61 @@ end
 -- Commit list
 ---------------------------------------------------------------------------
 
+--- One commit: sha, subject, ref decorations, and the author and date on the right.
+local function commit_line(commit, width)
+  local ui = panel()
+  local sha = commit.short or ""
+  local subject = commit.subject or ""
+  local meta = (commit.author or "") .. " · " .. (commit.rel_date or "")
+  local notes = {}
+  if commit.refs and commit.refs ~= "" then
+    notes[#notes + 1] = commit.refs
+  end
+  if #(commit.parents or {}) > 1 then
+    notes[#notes + 1] = "merge"
+  end
+  if commit.file and (commit.file.code == "R" or commit.file.code == "C") then
+    notes[#notes + 1] = "was " .. vim.fs.basename(commit.file.orig or "")
+  end
+  local refs = table.concat(notes, " · ")
+
+  local prefix_w = vim.fn.strdisplaywidth(sha) + 3
+  local meta_w = vim.fn.strdisplaywidth(meta)
+  local show_meta = width - prefix_w - 2 - meta_w >= 8
+  local right_w = show_meta and (2 + meta_w) or 0
+
+  local refs_text = ""
+  if refs ~= "" then
+    local room = width - prefix_w - right_w - 8
+    if room >= 8 then
+      local cap = math.min(vim.fn.strdisplaywidth(refs), math.floor(width * 0.4), room)
+      refs_text = ui.truncate(refs, cap)
+    end
+  end
+  local refs_w = refs_text ~= "" and (2 + vim.fn.strdisplaywidth(refs_text)) or 0
+  subject = ui.truncate(subject, math.max(width - prefix_w - refs_w - right_w, 0))
+
+  local text = " " .. sha .. "  " .. subject
+  local hls = {
+    { 1, 1 + #sha, "ScmSha" },
+    { #sha + 3, #text, "ScmPath" },
+  }
+  if refs_text ~= "" then
+    local at = #text + 2
+    text = text .. "  " .. refs_text
+    hls[#hls + 1] = { at, #text, "ScmRef" }
+  end
+  if show_meta then
+    local pad = width - vim.fn.strdisplaywidth(text) - meta_w
+    if pad < 2 then
+      pad = 2
+    end
+    text = text .. string.rep(" ", pad) .. meta
+    hls[#hls + 1] = { #text - #meta, #text, "ScmDim" }
+  end
+  return text, hls
+end
+
 --- @param view { path?: string, rev?: string, limit: integer }
 function M.render_log(add, view, width)
   local commits = git.log(state.root, { limit = view.limit + 1, path = view.path, rev = view.rev })
@@ -38,21 +93,8 @@ function M.render_log(add, view, width)
   end
 
   for _, commit in ipairs(commits) do
-    local item = { type = "commit", commit = commit, key = "commit:" .. commit.sha }
-    local subject = fit(commit.subject, width - #commit.short - 5)
-    add(
-      string.format(" %s  %s", commit.short, subject),
-      { { 1, 1 + #commit.short, "ScmSha" }, { 3 + #commit.short, -1, "ScmPath" } },
-      { item = item }
-    )
-    local meta = string.format("   %s · %s", commit.author, commit.rel_date)
-    if #commit.parents > 1 then
-      meta = meta .. " · merge"
-    end
-    if commit.file and (commit.file.code == "R" or commit.file.code == "C") then
-      meta = meta .. " · was " .. vim.fs.basename(commit.file.orig or "")
-    end
-    add(fit(meta, width - 1), { { 0, -1, "ScmDim" } }, { item = item })
+    local text, hls = commit_line(commit, width)
+    add(text, hls, { item = { type = "commit", commit = commit, key = "commit:" .. commit.sha } })
   end
 
   if more then

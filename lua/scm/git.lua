@@ -217,7 +217,7 @@ end
 local FS, RS = "\31", "\30"
 -- The record separator leads the format so that the `--name-status` output git
 -- appends for a path-filtered log lands inside the record it belongs to.
-local LOG_FORMAT = "%x1e" .. table.concat({ "%H", "%h", "%an", "%ar", "%as", "%P", "%s" }, "%x1f")
+local LOG_FORMAT = "%x1e" .. table.concat({ "%H", "%h", "%an", "%ar", "%as", "%P", "%s", "%D" }, "%x1f")
 
 --- One record: the formatted fields, optionally followed by NUL separated
 --- `--name-status` output for the path we are following.
@@ -237,6 +237,8 @@ local function parse_commit_record(record)
     date = f[5],
     parents = vim.split(f[6] or "", " ", { plain = true, trimempty = true }),
     subject = f[7] or "",
+    -- %D is "HEAD -> main, origin/main, tag: v1", or empty.
+    refs = vim.trim(f[8] or ""),
   }
 
   if nul then

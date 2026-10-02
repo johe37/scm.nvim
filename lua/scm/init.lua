@@ -18,6 +18,7 @@ local HIGHLIGHTS = {
   ScmDim = { link = "Comment" },
   ScmDir = { link = "Directory" },
   ScmSha = { link = "Identifier" },
+  ScmRef = { link = "Type" },
   ScmPath = { link = "Normal" },
   ScmAdded = { link = "Added" },
   ScmModified = { link = "Changed" },
