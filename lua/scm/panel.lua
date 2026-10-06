@@ -1,7 +1,8 @@
 -- The source-control panel. It takes over the current window (not a sidebar)
--- and hosts three views:
+-- and hosts four views:
 --   status  the working tree, grouped into Conflicts/Staged/Changes/Untracked
 --   log     a commit list, either repo-wide or for one file
+--   vs      every file the branch tip changed against its base ref
 --   commit  one commit: metadata, message, and the files it touched
 -- Opening a file hides this list so the diff can use the whole screen; `q` /
 -- `<BS>` in the diff brings the list back. `<BS>` in the panel walks back
@@ -377,6 +378,15 @@ local function build_statusline(view, width)
     end
   elseif view.kind == "help" then
     left = { { text = " Help", hl = "ScmTitle" } }
+  elseif view.kind == "vs" then
+    left = {
+      { text = " vs", hl = "ScmTitle" },
+      { text = "  " .. (view.base or ""), hl = "ScmBranch", flex = true },
+    }
+    local since = view.since
+    if since and not since.on_base and (since.commits or 0) > 0 then
+      left[#left + 1] = { text = " ↑" .. since.commits, hl = "ScmAdded", drop = true }
+    end
   elseif view.kind == "commit" then
     local commit = view.commit
     if commit then
@@ -471,6 +481,8 @@ local function render(buf)
 
   if view.kind == "log" then
     require("scm.log").render_log(add, view, width)
+  elseif view.kind == "vs" then
+    require("scm.log").render_vs(add, view, width)
   elseif view.kind == "commit" then
     require("scm.log").render_commit(add, view, width)
   elseif view.kind == "help" then
@@ -541,12 +553,19 @@ local function place_cursor(lnum, center)
 end
 
 local function place_first_item()
+  local fallback
   for lnum = 1, vim.api.nvim_buf_line_count(state.panel.buf) do
-    if state.panel.entries[lnum] then
-      return place_cursor(lnum, false)
+    local item = state.panel.entries[lnum]
+    if item then
+      -- `land = false` is a row above the list (the vs-base summary). Opening
+      -- the history should still start on the first commit.
+      if item.land ~= false then
+        return place_cursor(lnum, false)
+      end
+      fallback = fallback or lnum
     end
   end
-  return place_cursor(1, false)
+  return place_cursor(fallback or 1, false)
 end
 
 --- Remember which row to come back to. A header has no item, so the previous
@@ -676,6 +695,7 @@ local HELP = {
   "  l          history of the file under the cursor",
   "  <CR>       on a commit: inspect it (in a file's history: diff that file)",
   "             on a commit's file: diff it against the parent commit",
+  "             on vs <branch>: every file changed against that branch",
   "  gf         open the working tree file (not the historical blob)",
   "  i          inspect the commit under the cursor",
   "  D          the commit as one unified patch",
@@ -683,7 +703,8 @@ local HELP = {
   "  y          yank the commit sha",
   "  <BS>       back to the previous view",
   "  commits above the ── line are not on that branch",
-  "  opening a commit lists what is new since master, above its own files",
+  "  vs <branch> lists every file changed against that branch",
+  "  a commit lists only the files that commit changed",
   "",
   "Anywhere",
   "  J / K      next / previous item",
@@ -757,6 +778,8 @@ local function attach_keymaps(buf)
         M.refresh()
       elseif item.type == "file" then
         diff.open(item.entry, { focus = focus })
+      elseif item.type == "vs" then
+        log.open_vs({ base = item.base, rev = item.rev })
       elseif item.type == "commit" then
         -- In a file's history, the interesting thing is that file at that commit.
         if M.view().path and item.commit.file then

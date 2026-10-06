@@ -94,6 +94,9 @@ local function base_line(add, base, reached, width)
   })
 end
 
+-- Declared above the log renderer, which calls it while drawing the first row.
+local render_vs_row
+
 --- @param view { path?: string, rev?: string, limit: integer }
 function M.render_log(add, view, width)
   view.base_ref = nil
@@ -127,6 +130,16 @@ function M.render_log(add, view, width)
   if base and not view.path then
     view.base_ref = base
     view.ahead_count = git.ahead_of(state.root, base)
+    -- The whole branch against its base, one row above the commits. A file's
+    -- log stays a list of that file: this comparison is the repo, not the file.
+    local tip = view.rev or "HEAD"
+    if view.rev or view.ahead_count > 0 then
+      local since = git.since(state.root, base, tip, { files = false })
+      if since and not since.on_base and (since.commits or 0) > 0 then
+        render_vs_row(add, base, since, tip, width)
+        add("")
+      end
+    end
   end
 
   for i, commit in ipairs(commits) do
@@ -163,61 +176,92 @@ local function ref_heading(add, prefix, base, prefix_hl, width)
   add(text, hls)
 end
 
---- The pile of work this commit has that `master` (or its published tip) does
---- not. Drawn above the commit's own files, because one commit against its
---- parent hides a long run of earlier commits.
---- @return boolean ahead true when the comparison listed files
-local function render_since(add, commit, width)
-  local base = git.base_ref(state.root)
-  if not base then
-    return false
+--- "16 commits · 4 files", plus the insertion and deletion counts when present.
+local function since_parts(since)
+  local nfiles = since.file_count
+  if nfiles == nil then
+    nfiles = #(since.files or {})
   end
-  local since = git.since(state.root, base, commit.sha)
-  if not since then
-    return false
-  end
-  add("")
-  if since.on_base then
-    ref_heading(add, " on ", base, "ScmDim", width)
-    return false
-  end
-  ref_heading(add, " Since ", base, "ScmSection", width)
-
-  local front = string.format(
-    "  %d %s · %d %s",
-    since.commits,
-    since.commits == 1 and "commit" or "commits",
-    #since.files,
-    #since.files == 1 and "file" or "files"
+  local commits = since.commits or 0
+  local counts = string.format(
+    "%d %s · %d %s",
+    commits,
+    commits == 1 and "commit" or "commits",
+    nfiles,
+    nfiles == 1 and "file" or "files"
   )
-  local hls = { { 0, #front, "ScmPath" } }
-  local text = front
-  if since.added > 0 then
+  local plus = (since.added or 0) > 0 and ("+" .. since.added) or ""
+  local minus = (since.deleted or 0) > 0 and ("-" .. since.deleted) or ""
+  return counts, plus, minus
+end
+
+local function hl_line(parts, width)
+  local text = ""
+  local hls = {}
+  for _, part in ipairs(parts) do
     local at = #text
-    text = text .. "  +" .. since.added
-    hls[#hls + 1] = { at, #text, "ScmAdded" }
+    text = text .. part[1]
+    hls[#hls + 1] = { at, #text, part[2] }
   end
-  if since.deleted > 0 then
-    local at = #text
-    text = text .. "  -" .. since.deleted
-    hls[#hls + 1] = { at, #text, "ScmDeleted" }
-  end
-  text = clip(text, math.max(width - 1, 1))
+  text = clip(text, math.max(width, 1))
   for _, hl in ipairs(hls) do
     if hl[2] > #text then
       hl[2] = #text
     end
   end
-  add(text, hls)
+  return text, hls
+end
 
-  require("scm.tree").render(add, since.files, {
-    scope = "since:" .. commit.short,
-    width = width,
-    item = function(file)
-      return { type = "commit_file", file = file, key = "vs:" .. file.path }
-    end,
+--- One selectable row: the branch tip against `base`. Not where the cursor
+--- lands when the list opens — Enter on a commit is still the next step.
+function render_vs_row(add, base, since, rev, width)
+  local counts, plus, minus = since_parts(since)
+  local function pieces(with_diff)
+    local parts = {
+      { " vs ", "ScmSection" },
+      { base, "ScmBranch" },
+      { "   " .. counts, "ScmPath" },
+    }
+    if with_diff and plus ~= "" then
+      parts[#parts + 1] = { "  " .. plus, "ScmAdded" }
+    end
+    if with_diff and minus ~= "" then
+      parts[#parts + 1] = { "  " .. minus, "ScmDeleted" }
+    end
+    return parts
+  end
+  local function columns(parts)
+    local n = 0
+    for _, part in ipairs(parts) do
+      n = n + vim.fn.strdisplaywidth(part[1])
+    end
+    return n
+  end
+  local parts = pieces(true)
+  if columns(parts) > width then
+    parts = pieces(false)
+  end
+  if columns(parts) > width then
+    local room = width - (columns(parts) - vim.fn.strdisplaywidth(parts[2][1]))
+    parts[2][1] = panel().truncate(base, math.max(room, 1))
+  end
+  local text, hls = hl_line(parts, width)
+  add(text, hls, {
+    item = { type = "vs", key = "vs", base = base, rev = rev, land = false },
   })
-  return true
+end
+
+local function add_since_stats(add, since, width)
+  local counts, plus, minus = since_parts(since)
+  local parts = { { "  " .. counts, "ScmPath" } }
+  if plus ~= "" then
+    parts[#parts + 1] = { "  " .. plus, "ScmAdded" }
+  end
+  if minus ~= "" then
+    parts[#parts + 1] = { "  " .. minus, "ScmDeleted" }
+  end
+  local text, hls = hl_line(parts, math.max(width - 1, 1))
+  add(text, hls)
 end
 
 --- @param view { sha: string }
@@ -243,8 +287,6 @@ function M.render_commit(add, view, width)
     add(" merge of " .. #commit.parents .. " parents (vs first)", { { 0, -1, "ScmDim" } })
   end
 
-  local ahead = render_since(add, commit, width)
-
   if commit.body ~= "" then
     add("")
     for _, line in ipairs(vim.split(commit.body, "\n", { plain = true })) do
@@ -255,10 +297,7 @@ function M.render_commit(add, view, width)
   local files = git.commit_files(state.root, commit)
   view.files = files
   add("")
-  -- The list above is already every file changed since master. This one is
-  -- only what the commit itself did, so the two headings must not both say Files.
-  local files_heading = ahead and string.format(" This commit (%d)", #files) or string.format(" Files (%d)", #files)
-  add(files_heading, { { 0, -1, "ScmSection" } })
+  add(string.format(" Files (%d)", #files), { { 0, -1, "ScmSection" } })
   require("scm.tree").render(add, files, {
     -- Scoped to the commit so folding one does not fold every other commit's
     -- view of the same directory.
@@ -285,6 +324,47 @@ function M.open_log(opts)
   panel().set_view({ kind = "log", limit = M.PAGE, path = opts.path, rev = opts.rev })
 end
 
+--- Files changed on `rev` (default HEAD) that `base` does not have.
+---@param opts? { base?: string, rev?: string }
+function M.open_vs(opts)
+  opts = opts or {}
+  local base = opts.base or git.base_ref(state.root)
+  if not base then
+    return
+  end
+  panel().set_view({ kind = "vs", base = base, rev = opts.rev or "HEAD" })
+end
+
+--- The branch tip against its base: the summary, then every file in that range.
+---@param view { base: string, rev?: string }
+function M.render_vs(add, view, width)
+  local since = git.since(state.root, view.base, view.rev or "HEAD")
+  view.since = since
+  if not since then
+    add(" could not compare with " .. view.base, { { 0, -1, "ScmConflict" } })
+    return
+  end
+  if since.on_base then
+    ref_heading(add, " on ", view.base, "ScmDim", width)
+    return
+  end
+  ref_heading(add, " vs ", view.base, "ScmSection", width)
+  add_since_stats(add, since, width)
+  if #(since.files or {}) == 0 then
+    add("")
+    add("  No file changes", { { 0, -1, "ScmDim" } })
+    return
+  end
+  add("")
+  require("scm.tree").render(add, since.files, {
+    scope = "vs:" .. view.base,
+    width = width,
+    item = function(file)
+      return { type = "commit_file", file = file, key = "vf:" .. file.path }
+    end,
+  })
+end
+
 --- Show one commit's details in the panel.
 function M.open_commit(rev)
   local info, err = git.commit_info(state.root, rev)
@@ -305,6 +385,10 @@ function M.open_file_diff(file)
   if file.code ~= "D" then
     right = git.spec(file.sha, file.path)
   end
+  -- A comparison against a base ref names that ref. A commit's own file names
+  -- the parent sha, and says the change belongs to this commit.
+  local left_name = file.parent_label or (file.parent and file.parent:sub(1, 7)) or "parent"
+  local right_name = file.sha and file.sha:sub(1, 7) or ""
   require("scm.diff").open({
     path = file.path,
     code = file.code,
@@ -312,9 +396,10 @@ function M.open_file_diff(file)
     label = file.label,
     left_spec = left,
     right_spec = right,
-    left_label = left and (file.parent and file.parent:sub(1, 7) or "parent") .. ":" .. (file.orig or file.path)
-      or "(added in this commit)",
-    right_label = right and (file.sha:sub(1, 7) .. ":" .. file.path) or "(deleted in this commit)",
+    left_label = left and (left_name .. ":" .. (file.orig or file.path))
+      or (file.parent_label and "(added)" or "(added in this commit)"),
+    right_label = right and (right_name .. ":" .. file.path)
+      or (file.parent_label and "(deleted)" or "(deleted in this commit)"),
   })
 end
 

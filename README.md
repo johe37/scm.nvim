@@ -63,8 +63,9 @@ you came from; `:Scm` / your prefix+gg mapping always returns to the working
 tree, even if you are in history:
 
 - **status** — the working tree (this is what `:Scm` opens)
-- **log** — a commit list, repo-wide (`L`) or for a single file (`l`)
-- **commit** — one commit: sha, author, date, full message, and its files
+- **log** — a commit list, repo-wide (`L`) or for a single file (`l`). When the branch is ahead of its base, the first row opens every file changed against that base
+- **vs** — those files, diffed against the base (three-dot), opened from the row in the log
+- **commit** — one commit: sha, author, date, full message, and the files that commit touched
 
 Both file lists group by directory. Chains of directories with a single child
 are joined into one line (`lua/scm/` rather than `lua/` above `scm/`), so a
@@ -92,7 +93,8 @@ History:
 | `L` | Commit history for the repository |
 | `l` | History of the file under the cursor |
 | `<CR>` | On a commit: inspect it — in a file's history: diff that file at that commit |
-| | On a commit's file: diff it against the parent commit |
+| | On `vs <branch>`: every file changed against that branch |
+| | On a commit's file: diff it against the parent commit. On a file in the vs view: diff it against the base |
 | `gf` | Open the working-tree file (not the historical blob) |
 | `i` | Inspect the commit under the cursor |
 | `D` | Open the commit as one unified patch (`q` / `<BS>` back) |
@@ -139,6 +141,9 @@ The panel mirrors what VS Code shows when you click an entry:
   `<leader>gf`) closes the diff and opens the working-tree file at the same line
   so you can edit. A file added in the commit gets an empty left side, a deleted
   one an empty right side, and a renamed one is compared against its old path.
+- **A file in the vs view** — the base ref on the left, the branch tip on the
+  right. Same read-only rules. The left label is the base name (`origin/master`),
+  not a parent sha.
 
 A file's history follows renames (`git log --follow`), so a commit that renamed
 the file is annotated with the name it had before, and diffing it compares the

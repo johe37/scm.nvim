@@ -463,8 +463,12 @@ end
 --- What `sha` introduced after it left `base`. Three-dot: commits and files on
 --- this side, not changes that exist only on `base`.
 --- `on_base` means `sha` is already contained in `base`. Nil when git can't tell.
----@return { on_base: boolean, commits?: integer, added?: integer, deleted?: integer, files?: table[] }|nil
-function M.since(root, base, sha)
+--- `opts.files` defaults to true. `false` skips the name list; `file_count` still
+--- comes from `--shortstat`, which is enough for the history row.
+---@param opts? { files?: boolean }
+---@return { on_base: boolean, commits?: integer, added?: integer, deleted?: integer, file_count?: integer, files?: table[] }|nil
+function M.since(root, base, sha, opts)
+  opts = opts or {}
   local contained = M.run({ "merge-base", "--is-ancestor", sha, base }, { cwd = root })
   if contained.code == 0 then
     return { on_base = true }
@@ -476,28 +480,38 @@ function M.since(root, base, sha)
   local range = base .. "..." .. sha
   local count = M.run({ "rev-list", "--count", base .. ".." .. sha }, { cwd = root })
   local stat = M.run({ "diff", "--shortstat", "--find-renames", range }, { cwd = root })
-  local names = M.run({ "diff", "-z", "--name-status", "--find-renames", range }, { cwd = root })
-  if count.code ~= 0 or stat.code ~= 0 or names.code ~= 0 then
+  if count.code ~= 0 or stat.code ~= 0 then
     return nil
   end
-  local mb = M.run({ "merge-base", base, sha }, { cwd = root })
-  local parent = mb.code == 0 and vim.trim(mb.stdout) or nil
   local summary = vim.trim(stat.stdout)
-  local files = parse_name_status(names.stdout)
-  for _, file in ipairs(files) do
-    -- Left side of a file diff is the fork point, which is what the three-dot
-    -- range actually compares.
-    file.kind = "commit_file"
-    file.sha = sha
-    file.parent = parent
-  end
-  return {
+  local result = {
     on_base = false,
     commits = tonumber(vim.trim(count.stdout)) or 0,
     added = tonumber(summary:match("(%d+) insertion")) or 0,
     deleted = tonumber(summary:match("(%d+) deletion")) or 0,
-    files = files,
+    file_count = tonumber(summary:match("(%d+) file")) or 0,
   }
+  if opts.files == false then
+    return result
+  end
+  local names = M.run({ "diff", "-z", "--name-status", "--find-renames", range }, { cwd = root })
+  if names.code ~= 0 then
+    return nil
+  end
+  local mb = M.run({ "merge-base", base, sha }, { cwd = root })
+  local parent = mb.code == 0 and vim.trim(mb.stdout) or nil
+  local files = parse_name_status(names.stdout)
+  for _, file in ipairs(files) do
+    -- Left side of a file diff is the fork point, which is what the three-dot
+    -- range actually compares. Name it after the base ref, not that sha.
+    file.kind = "commit_file"
+    file.sha = sha
+    file.parent = parent
+    file.parent_label = base
+  end
+  result.files = files
+  result.file_count = #files
+  return result
 end
 
 --- The whole commit as a unified patch.
